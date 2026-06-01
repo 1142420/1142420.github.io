@@ -8,7 +8,7 @@
       body { font-family: Arial, sans-serif; background: #111; color: #eee; margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
       video, canvas { border: 2px solid #444; border-radius: 8px; max-width: 100%; }
       #status { margin-top: 16px; font-size: 2rem; font-weight: 700; }
-      #debug { margin-top: 8px; font-size: 0.9rem; color: #888; }
+      #debug { margin-top: 8px; font-size: 0.9rem; color: #888; max-width: 600px; }
       .clap { color: #5cfb6c; }
       .wait { color: #f55; }
       .hint { margin-top: 8px; color: #bbb; }
@@ -17,74 +17,121 @@
   <body>
     <h1>Clap Detector (Browser)</h1>
     <video id="video" autoplay playsinline width="640" height="480"></video>
-    <div id="status" class="wait">等待偵測...</div>
+    <div id="status" class="wait">初始化中...</div>
     <div id="debug"></div>
     <div class="hint">按下「允許」後，對著鏡頭拍手。</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm/vision_bundle.js"></script>
     <script>
       const videoElement = document.getElementById('video');
       const statusEl = document.getElementById('status');
       const debugEl = document.getElementById('debug');
       
-      const hands = new Hands({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-      });
+      let hands = null;
+      let camera = null;
+      let frameCount = 0;
 
-      hands.setOptions({
-        maxNumHands: 2,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-      });
+      async function initializeHands() {
+        debugEl.textContent = '正在載入 MediaPipe...';
+        
+        try {
+          const vision = await Mediapipe.FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+          );
+          
+          hands = await Mediapipe.HandLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath: "https://storage.googleapis.com/mediapipe-studio/production/v1/hand_landmarker.task",
+              delegate: "GPU"
+            },
+            runningMode: "VIDEO",
+            numHands: 2,
+            minHandDetectionConfidence: 0.5,
+            minHandPresenceConfidence: 0.5,
+            minTrackingConfidence: 0.5
+          });
+          
+          debugEl.textContent = 'MediaPipe 已載入，等待相機...';
+          startCamera();
+        } catch (err) {
+          debugEl.textContent = `載入失敗: ${err.message}`;
+          console.error('MediaPipe initialization error:', err);
+        }
+      }
+
+      function startCamera() {
+        navigator.mediaDevices.getUserMedia({ 
+          video: { width: 640, height: 480 },
+          audio: false
+        }).then(stream => {
+          videoElement.srcObject = stream;
+          videoElement.onloadedmetadata = () => {
+            videoElement.play();
+            debugEl.textContent = '相機已啟動，開始偵測...';
+            detectHands();
+          };
+        }).catch(err => {
+          debugEl.textContent = `相機權限被拒: ${err.message}`;
+          statusEl.textContent = '請允許相機存取';
+          console.error('Camera access error:', err);
+        });
+      }
 
       function handCenter(landmarks) {
+        if (!landmarks || landmarks.length === 0) return null;
         const sum = landmarks.reduce((acc, lm) => ({ x: acc.x + lm.x, y: acc.y + lm.y }), { x: 0, y: 0 });
         return { x: sum.x / landmarks.length, y: sum.y / landmarks.length };
       }
 
       function distanceBetween(pointA, pointB) {
+        if (!pointA || !pointB) return 999;
         return Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
       }
 
-      function updateStatus(clap, dist) {
-        if (clap) {
-          statusEl.textContent = 'CLAP!';
-          statusEl.className = 'clap';
+      function detectHands() {
+        if (!hands || !videoElement.srcObject) {
+          setTimeout(detectHands, 100);
+          return;
+        }
+
+        const now = performance.now();
+        const results = hands.detectForVideo(videoElement, now);
+
+        if (results && results.landmarks && results.landmarks.length === 2) {
+          const hand1Center = handCenter(results.landmarks[0]);
+          const hand2Center = handCenter(results.landmarks[1]);
+          const dist = distanceBetween(hand1Center, hand2Center);
+
+          if (dist < 0.15) {
+            statusEl.textContent = 'CLAP!';
+            statusEl.className = 'clap';
+          } else {
+            statusEl.textContent = '等待偵測...';
+            statusEl.className = 'wait';
+          }
+          debugEl.textContent = `偵測到 2 隻手 | 距離: ${dist.toFixed(3)}`;
         } else {
+          const handCount = (results && results.landmarks) ? results.landmarks.length : 0;
           statusEl.textContent = '等待偵測...';
           statusEl.className = 'wait';
+          debugEl.textContent = `偵測到的手: ${handCount}/2`;
         }
-        debugEl.textContent = `距離: ${dist.toFixed(3)}`;
+
+        frameCount++;
+        requestAnimationFrame(detectHands);
       }
 
-      hands.onResults((results) => {
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length === 2) {
-          const hand1 = handCenter(results.multiHandLandmarks[0]);
-          const hand2 = handCenter(results.multiHandLandmarks[1]);
-          const dist = distanceBetween(hand1, hand2);
-          updateStatus(dist < 0.15, dist);
-        } else {
-          debugEl.textContent = `偵測到的手: ${results.multiHandLandmarks?.length || 0}`;
-          updateStatus(false, 999);
-        }
-      });
-
-      const camera = new Camera(videoElement, {
-        onFrame: async () => {
-          await hands.send({ image: videoElement });
-        },
-        width: 640,
-        height: 480
-      });
-
-      camera.start().catch((err) => {
-        statusEl.textContent = '無法啟動攝影機：' + err.message;
-        statusEl.className = 'wait';
-        console.error('Camera error:', err);
-      });
-      
-      console.log('Clap Detector initialized');
+      // 等待 Mediapipe 腳本載入完成
+      if (typeof Mediapipe !== 'undefined') {
+        initializeHands();
+      } else {
+        const checkMediapipe = setInterval(() => {
+          if (typeof Mediapipe !== 'undefined') {
+            clearInterval(checkMediapipe);
+            initializeHands();
+          }
+        }, 100);
+      }
     </script>
   </body>
 </html>
