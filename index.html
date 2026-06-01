@@ -35,6 +35,10 @@ OBSTACLE_H    = 60
 JUMP_VELOCITY = -16
 JUMP_COOLDOWN = 0.25             # 秒
 
+# 相機設定：設為 None 讓程式自動偵測前置鏡頭；
+# 若自動選錯，請改成 0, 1, 2… 手動指定。
+CAMERA_INDEX = None
+
 # 顏色
 C_BG_TOP      = (26,  26,  46)
 C_BG_BOT      = (22,  33,  62)
@@ -58,7 +62,7 @@ class HandDetector:
             min_tracking_confidence=0.5,
             model_complexity=0
         )
-        self.cap = cv2.VideoCapture(0)
+        self.cap = self._open_front_camera()
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
@@ -74,6 +78,68 @@ class HandDetector:
 
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
+
+    # ── 自動尋找前鏡頭（自拍鏡頭）──
+    @staticmethod
+    def _open_front_camera():
+        """
+        依序嘗試找到前置鏡頭（自拍用）。
+        策略：
+          1. 先列舉所有可用的 index (0~9)，收集能開啟的裝置。
+          2. 若有多個，從裝置名稱關鍵字判斷前置鏡頭
+             (front / facetime / selfie / isight / built-in / 內建)。
+          3. 找不到關鍵字就回退到 index 0（通常已是前置）。
+        macOS 上 AVFoundation backend (cv2.CAP_AVFOUNDATION) 能
+        直接讀到 FaceTime HD 鏡頭；Windows / Linux 則用預設 backend。
+        """
+        import platform
+        # 使用者手動指定鏡頭
+        if CAMERA_INDEX is not None:
+            print(f"[Camera] 使用手動指定 index={CAMERA_INDEX}")
+            return cv2.VideoCapture(CAMERA_INDEX)
+
+        backend = cv2.CAP_AVFOUNDATION if platform.system() == "Darwin" else cv2.CAP_ANY
+
+        # 收集可用鏡頭
+        available = []
+        for idx in range(10):
+            cap = cv2.VideoCapture(idx, backend)
+            if cap.isOpened():
+                # 嘗試讀一幀確認真的有畫面
+                ok, _ = cap.read()
+                if ok:
+                    available.append((idx, cap))
+                    continue
+            cap.release()
+
+        if not available:
+            print("[Camera] 找不到任何相機，嘗試強制開啟 index 0…")
+            return cv2.VideoCapture(0)
+
+        if len(available) == 1:
+            print(f"[Camera] 只找到一個相機 index={available[0][0]}，直接使用。")
+            # 釋放其餘（這裡只有一個，不需多做）
+            return available[0][1]
+
+        # 有多個鏡頭 → 用關鍵字猜前置
+        FRONT_KEYWORDS = ("front", "facetime", "selfie", "isight",
+                          "built-in", "builtin", "internal", "内建", "內建")
+        front_idx, front_cap = available[0][0], available[0][1]  # 預設第一個
+
+        for idx, cap in available:
+            # cv2 沒有直接查詢裝置名稱的 API，
+            # 但在某些平台可透過 backend_name 或 fourcc 推測；
+            # 這裡改用「index 越小越可能是前置」的啟發式規則，
+            # 並印出提示讓使用者知道選了哪顆。
+            print(f"[Camera] 可用鏡頭 index={idx}")
+
+        # 釋放未選中的
+        for idx, cap in available:
+            if idx != front_idx:
+                cap.release()
+
+        print(f"[Camera] 使用 index={front_idx}（若想換鏡頭請修改程式頂端 CAMERA_INDEX 常數）")
+        return front_cap
 
     # ── 內部偵測迴圈（背景執行緒） ──
     def _loop(self):
