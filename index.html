@@ -3,25 +3,26 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Clap Dodge - 拍手閃避遊戲</title>
+    <title>Clap Dodge - 拍手跳躍遊戲</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body { font-family: Arial, sans-serif; background: #111; color: #eee; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
-      .container { max-width: 800px; width: 100%; }
+      .container { max-width: 900px; width: 100%; }
       h1 { text-align: center; margin-bottom: 16px; }
-      .game-area { position: relative; width: 100%; aspect-ratio: 16/9; background: #1a1a1a; border: 3px solid #444; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
-      video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.3; }
+      .game-area { position: relative; width: 100%; aspect-ratio: 16/9; background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%); border: 3px solid #444; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+      video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.25; }
       canvas { position: absolute; top: 0; left: 0; }
       .ui { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 12px 16px; border-radius: 8px; z-index: 100; }
       .score { font-size: 1.5rem; font-weight: bold; color: #5cfb6c; }
-      .game-over { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); padding: 40px; border-radius: 12px; text-align: center; z-index: 200; display: none; }
+      .info { margin-top: 8px; font-size: 0.9rem; color: #aaa; }
+      .game-over { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.95); padding: 40px; border-radius: 12px; text-align: center; z-index: 200; display: none; }
       .game-over h2 { font-size: 2.5rem; color: #ff6b6b; margin-bottom: 16px; }
       .game-over p { font-size: 1.2rem; margin-bottom: 12px; }
       .game-over button { padding: 12px 24px; background: #5cfb6c; color: #111; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: bold; }
       .game-over button:hover { background: #4de559; }
-      .hand-indicator { position: absolute; bottom: 10px; left: 10px; right: 10px; display: flex; gap: 20px; justify-content: center; z-index: 50; }
-      .hand { padding: 8px 16px; background: rgba(0,0,0,0.7); border-radius: 4px; font-size: 0.9rem; }
-      .hand.active { background: #5cfb6c; color: #111; font-weight: bold; }
+      .detector { position: absolute; bottom: 10px; left: 10px; right: 10px; display: flex; gap: 20px; justify-content: center; z-index: 50; flex-wrap: wrap; }
+      .detector-item { padding: 6px 12px; background: rgba(0,0,0,0.7); border-radius: 4px; font-size: 0.8rem; border: 1px solid #555; }
+      .detector-item.active { background: #5cfb6c; color: #111; font-weight: bold; border-color: #5cfb6c; }
       .instructions { background: #222; padding: 16px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9rem; line-height: 1.6; }
       .instructions h3 { color: #5cfb6c; margin-bottom: 8px; }
       .instructions ul { margin-left: 20px; }
@@ -30,15 +31,16 @@
   </head>
   <body>
     <div class="container">
-      <h1>🎮 Clap Dodge - 拍手閃避遊戲</h1>
+      <h1>🎮 Clap Jump - 拍手跳躍遊戲</h1>
       
       <div class="instructions">
         <h3>📖 遊戲說明：</h3>
         <ul>
-          <li>👋 拍左手 (左手往右移動) → 躲避左邊的障礙物</li>
-          <li>👋 拍右手 (右手往左移動) → 躲避右邊的障礙物</li>
+          <li>👋 <strong>拍手就會跳躍</strong>（用力拍 = 跳得更高）</li>
+          <li>🦖 躲避從右邊來的紅色障礙物</li>
           <li>🎯 成功躲避得 1 分</li>
           <li>❌ 被擊中遊戲結束</li>
+          <li>📈 每 5 分難度加倍</li>
         </ul>
       </div>
 
@@ -47,10 +49,11 @@
         <canvas id="canvas"></canvas>
         <div class="ui">
           <div class="score">得分: <span id="score">0</span></div>
+          <div class="info">速度: <span id="speed">1.0</span>x</div>
         </div>
-        <div class="hand-indicator">
-          <div class="hand" id="leftHand">👈 左手</div>
-          <div class="hand" id="rightHand">右手 👉</div>
+        <div class="detector">
+          <div class="detector-item" id="handDetector">👋 手部偵測: --</div>
+          <div class="detector-item" id="audioDetector">🎤 聲音: --</div>
         </div>
         <div class="game-over" id="gameOver">
           <h2>遊戲結束！</h2>
@@ -66,46 +69,61 @@
       const canvas = document.getElementById('canvas');
       const ctx = canvas.getContext('2d');
       const scoreDisplay = document.getElementById('score');
+      const speedDisplay = document.getElementById('speed');
       const gameOverDiv = document.getElementById('gameOver');
       const finalScoreDisplay = document.getElementById('finalScore');
-      const leftHandIndicator = document.getElementById('leftHand');
-      const rightHandIndicator = document.getElementById('rightHand');
+      const handDetectorIndicator = document.getElementById('handDetector');
+      const audioDetectorIndicator = document.getElementById('audioDetector');
 
       // 設置 canvas
       canvas.width = canvas.parentElement.offsetWidth;
       canvas.height = canvas.parentElement.offsetHeight;
 
+      // 遊戲常量
+      const GRAVITY = 0.6;
+      const GROUND_Y = canvas.height - 120;
+      const DINO_WIDTH = 50;
+      const DINO_HEIGHT = 50;
+      const OBSTACLE_WIDTH = 40;
+      const OBSTACLE_HEIGHT = 60;
+
       // 遊戲變量
       let hands = null;
       let gameRunning = true;
       let score = 0;
-      let playerX = canvas.width / 2;
-      const playerWidth = 60;
-      const playerHeight = 100;
-      let obstacles = [];
-      let obstacleSpawnRate = 0.02;
       let gameSpeed = 1;
+      let obstacles = [];
+      let obstacleSpawnCounter = 0;
+      let obstacleSpawnRate = 150;
 
-      // 玩家偵測
-      let leftHandPos = null;
-      let rightHandPos = null;
+      // 玩家（恐龍）
+      let dinoX = 50;
+      let dinoY = GROUND_Y;
+      let dinoVelocityY = 0;
+      let isJumping = false;
+
+      // 偵測變量
+      let lastHandDistance = 0;
+      let lastHandDistanceTime = 0;
+      let handDistanceVelocity = 0;
+      let lastAudioTime = 0;
+
+      // 音頻偵測
+      let audioContext = null;
+      let analyser = null;
+      let dataArray = null;
+      let mediaStream = null;
 
       const Obstacle = class {
-        constructor(side) {
-          this.side = side; // 'left' or 'right'
-          this.x = side === 'left' ? -80 : canvas.width;
-          this.y = Math.random() * (canvas.height - 100);
-          this.width = 80;
-          this.height = 100;
-          this.speed = 4 + gameSpeed;
+        constructor() {
+          this.x = canvas.width;
+          this.y = GROUND_Y;
+          this.width = OBSTACLE_WIDTH;
+          this.height = OBSTACLE_HEIGHT;
         }
 
         update() {
-          if (this.side === 'left') {
-            this.x += this.speed;
-          } else {
-            this.x -= this.speed;
-          }
+          this.x -= (5 + gameSpeed * 2);
         }
 
         draw() {
@@ -117,13 +135,12 @@
         }
 
         isOffScreen() {
-          return (this.side === 'left' && this.x > canvas.width) ||
-                 (this.side === 'right' && this.x + this.width < 0);
+          return this.x + this.width < 0;
         }
 
-        collidesWith(px, py, pw, ph) {
-          return !(px + pw < this.x || px > this.x + this.width ||
-                   py + ph < this.y || py > this.y + this.height);
+        collidesWith(dx, dy, dw, dh) {
+          return !(dx + dw < this.x || dx > this.x + this.width ||
+                   dy + dh < this.y || dy > this.y + this.height);
         }
       };
 
@@ -136,13 +153,22 @@
           maxNumHands: 2,
           minDetectionConfidence: 0.5,
           minTrackingConfidence: 0.5,
-          modelComplexity: 1
+          modelComplexity: 0
         });
       }
 
-      function getHandPosition(landmarks) {
+      function setupAudio(stream) {
+        if (audioContext) return;
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamAudioSource(stream);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
+      }
+
+      function handCenter(landmarks) {
         if (!landmarks || landmarks.length === 0) return null;
-        // 計算手的中心
         let sumX = 0, sumY = 0;
         for (let lm of landmarks) {
           sumX += lm.x;
@@ -154,28 +180,103 @@
         };
       }
 
-      function updatePlayerPosition() {
-        if (leftHandPos) {
-          // 左手在左邊 → 玩家往左移動
-          playerX = Math.max(0, leftHandPos.x - playerWidth / 2);
-        } else if (rightHandPos) {
-          // 右手在右邊 → 玩家往右移動
-          playerX = Math.min(canvas.width - playerWidth, rightHandPos.x - playerWidth / 2);
+      function distanceBetween(p1, p2) {
+        if (!p1 || !p2) return 999;
+        const dx = p1.x - p2.x;
+        const dy = p1.y - p2.y;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+
+      function detectClapFromHands(results) {
+        if (!results.multiHandLandmarks || results.multiHandLandmarks.length < 2) {
+          handDetectorIndicator.textContent = '👋 手部偵測: 需要 2 隻手';
+          handDetectorIndicator.classList.remove('active');
+          return false;
+        }
+
+        const center1 = handCenter(results.multiHandLandmarks[0]);
+        const center2 = handCenter(results.multiHandLandmarks[1]);
+        const dist = distanceBetween(center1, center2);
+
+        // 計算距離變化速度
+        const now = Date.now();
+        const timeDelta = Math.max(now - lastHandDistanceTime, 1);
+        handDistanceVelocity = (lastHandDistance - dist) / timeDelta * 1000; // 每秒像素變化
+
+        handDetectorIndicator.textContent = `👋 手部距離: ${(dist * 100).toFixed(0)}px (速度: ${handDistanceVelocity.toFixed(2)})`;
+
+        lastHandDistance = dist;
+        lastHandDistanceTime = now;
+
+        // 如果手快速靠近（距離快速減小），認為是拍手
+        // 閾值：每秒靠近超過 300px
+        if (handDistanceVelocity > 300) {
+          handDetectorIndicator.classList.add('active');
+          return true;
+        } else {
+          handDetectorIndicator.classList.remove('active');
+          return false;
         }
       }
 
-      function drawPlayer() {
+      function detectClapFromAudio() {
+        if (!analyser || !dataArray) return false;
+
+        analyser.getByteFrequencyData(dataArray);
+        
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const average = sum / dataArray.length;
+
+        audioDetectorIndicator.textContent = `🎤 聲音: ${average.toFixed(0)}`;
+
+        // 如果音量超過閾值且距離上一次拍手超過 200ms
+        if (average > 80 && Date.now() - lastAudioTime > 200) {
+          audioDetectorIndicator.classList.add('active');
+          lastAudioTime = Date.now();
+          return true;
+        } else {
+          audioDetectorIndicator.classList.remove('active');
+          return false;
+        }
+      }
+
+      function jump() {
+        if (!isJumping) {
+          dinoVelocityY = -15; // 跳躍速度
+          isJumping = true;
+        }
+      }
+
+      function updateDino() {
+        // 應用重力
+        dinoVelocityY += GRAVITY;
+        dinoY += dinoVelocityY;
+
+        // 檢查是否著地
+        if (dinoY >= GROUND_Y) {
+          dinoY = GROUND_Y;
+          dinoVelocityY = 0;
+          isJumping = false;
+        }
+      }
+
+      function drawDino() {
         ctx.fillStyle = '#5cfb6c';
-        ctx.fillRect(playerX, canvas.height - playerHeight - 20, playerWidth, playerHeight);
+        ctx.fillRect(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT);
         ctx.strokeStyle = '#00ff00';
         ctx.lineWidth = 3;
-        ctx.strokeRect(playerX, canvas.height - playerHeight - 20, playerWidth, playerHeight);
+        ctx.strokeRect(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT);
+        // 眼睛
+        ctx.fillStyle = '#000';
+        ctx.fillRect(dinoX + 15, dinoY + 15, 8, 8);
       }
 
       function checkCollisions() {
-        const playerY = canvas.height - playerHeight - 20;
         for (let i = obstacles.length - 1; i >= 0; i--) {
-          if (obstacles[i].collidesWith(playerX, playerY, playerWidth, playerHeight)) {
+          if (obstacles[i].collidesWith(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT)) {
             endGame();
             return;
           }
@@ -194,29 +295,16 @@
         try {
           const results = await hands.process(videoElement);
           
-          leftHandPos = null;
-          rightHandPos = null;
-          leftHandIndicator.classList.remove('active');
-          rightHandIndicator.classList.remove('active');
+          // 偵測拍手（手部快速靠近）
+          const clapFromHands = detectClapFromHands(results);
 
-          if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            // 判斷是左手還是右手
-            for (let i = 0; i < results.multiHandLandmarks.length; i++) {
-              const handedness = results.multiHandedness[i];
-              const label = handedness.label; // 'Left' or 'Right'
-              const pos = getHandPosition(results.multiHandLandmarks[i]);
+          // 偵測拍手（聲音）
+          const clapFromAudio = detectClapFromAudio();
 
-              if (label === 'Left') {
-                leftHandPos = pos;
-                leftHandIndicator.classList.add('active');
-              } else {
-                rightHandPos = pos;
-                rightHandIndicator.classList.add('active');
-              }
-            }
+          // 任一方法偵測到拍手就跳躍
+          if (clapFromHands || clapFromAudio) {
+            jump();
           }
-
-          updatePlayerPosition();
         } catch (err) {
           console.error('Detection error:', err);
         }
@@ -227,13 +315,25 @@
       function gameLoop() {
         if (!gameRunning) return;
 
-        // 清空 canvas
-        ctx.fillStyle = 'rgba(26, 26, 26, 0.3)';
+        // 繪製背景
+        ctx.fillStyle = 'rgba(26, 26, 46, 0.3)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+        // 繪製地面
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, GROUND_Y);
+        ctx.lineTo(canvas.width, GROUND_Y);
+        ctx.stroke();
+
         // 生成障礙物
-        if (Math.random() < obstacleSpawnRate) {
-          obstacles.push(new Obstacle(Math.random() > 0.5 ? 'left' : 'right'));
+        obstacleSpawnCounter++;
+        if (obstacleSpawnCounter > obstacleSpawnRate) {
+          obstacles.push(new Obstacle());
+          obstacleSpawnCounter = 0;
+          // 難度增加時，障礙物生成更頻繁
+          obstacleSpawnRate = Math.max(80, 150 - score * 3);
         }
 
         // 更新並繪製障礙物
@@ -245,19 +345,21 @@
             obstacles.splice(i, 1);
             score++;
             scoreDisplay.textContent = score;
-            // 難度增加
+
+            // 每 5 分難度增加
             if (score % 5 === 0) {
               gameSpeed += 0.5;
-              obstacleSpawnRate += 0.005;
+              speedDisplay.textContent = gameSpeed.toFixed(1);
             }
           }
         }
 
+        // 更新並繪製玩家
+        updateDino();
+        drawDino();
+
         // 檢查碰撞
         checkCollisions();
-
-        // 繪製玩家
-        drawPlayer();
 
         requestAnimationFrame(gameLoop);
       }
@@ -265,19 +367,23 @@
       async function start() {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: true
           });
 
+          mediaStream = stream;
           videoElement.srcObject = stream;
+          
           videoElement.onloadedmetadata = async () => {
             videoElement.play();
+            setupAudio(stream);
             await initHands();
             processFrame();
             gameLoop();
           };
         } catch (err) {
-          alert(`相機錯誤: ${err.message}`);
-          console.error('Camera error:', err);
+          alert(`相機/麥克風錯誤: ${err.message}`);
+          console.error('Init error:', err);
         }
       }
 
