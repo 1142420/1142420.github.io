@@ -1,329 +1,234 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-Hant">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Clap Jump</title>
-
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Clap Jump - 拍手跳躍遊戲</title>
 <style>
-body{
-    margin:0;
-    background:#111;
-    color:white;
-    font-family:Arial;
-    text-align:center;
-}
-
-h1{
-    margin-top:20px;
-}
-
-canvas{
-    background:#222;
-    border:3px solid #444;
-    margin-top:20px;
-    width:90%;
-    max-width:900px;
-    height:400px;
-}
-
-button{
-    padding:12px 24px;
-    font-size:18px;
-    margin-top:20px;
-    cursor:pointer;
-}
-
-#status{
-    margin-top:10px;
-    color:#5cfb6c;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: Arial, sans-serif; background: #111; color: #eee; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 10px; user-select: none; }
+.container { max-width: 900px; width: 100%; }
+h1 { text-align: center; margin-bottom: 16px; font-size: 1.5rem; }
+.game-area { position: relative; width: 100%; padding-bottom: 56.25%; background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%); border: 3px solid #444; border-radius: 8px; overflow: hidden; margin-bottom: 16px; touch-action: none; cursor: pointer; }
+video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.4; z-index: 1; background: #000; transform: scaleX(-1); }
+canvas { position: absolute; top: 0; left: 0; z-index: 2; width: 100%; height: 100%; }
+.ui { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 8px; z-index: 100; }
+.score { font-size: 1.2rem; font-weight: bold; color: #5cfb6c; }
+.info { margin-top: 4px; font-size: 0.8rem; color: #aaa; }
+.game-over { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.95); padding: 30px; border-radius: 12px; text-align: center; z-index: 200; display: none; width: 80%; max-width: 300px; }
+.game-over h2 { font-size: 2rem; color: #ff6b6b; margin-bottom: 16px; }
+.game-over p { font-size: 1.1rem; margin-bottom: 12px; }
+.game-over button { padding: 10px 20px; background: #5cfb6c; color: #111; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: bold; width: 100%; }
+.detector { position: absolute; bottom: 10px; left: 10px; right: 10px; display: flex; gap: 10px; justify-content: center; z-index: 50; flex-wrap: wrap; }
+.detector-item { padding: 6px 10px; background: rgba(0,0,0,0.7); border-radius: 4px; font-size: 0.8rem; border: 1px solid #555; }
+.detector-item.active { background: #5cfb6c; color: #111; font-weight: bold; border-color: #5cfb6c; }
+.instructions { background: #222; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 0.85rem; line-height: 1.5; }
+.instructions h3 { color: #5cfb6c; margin-bottom: 8px; }
+.instructions ul { margin-left: 20px; }
+.start-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.85); z-index: 300; flex-direction: column; gap: 12px; padding: 20px; text-align: center; transition: opacity 0.3s; }
+.start-overlay.hidden { display: none; opacity: 0; }
+.start-button { padding: 14px 24px; font-size: 1.1rem; background: #5cfb6c; color: #111; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; max-width: 250px; }
+.start-hint { color: #ddd; font-size: 0.9rem; max-width: 420px; line-height: 1.5; }
+.small-btn { padding: 8px 12px; font-size: 0.9rem; background: #333; color: #eee; border: 1px solid #555; border-radius: 6px; cursor: pointer; }
+.status-line { margin-top: 6px; color: #5cfb6c; font-size: 1rem; font-weight: bold; }
+select { padding: 8px; border-radius: 6px; background: #333; color: white; border: 1px solid #555; max-width: 200px; }
+.control-row { margin-top: 8px; display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap;}
+.spinner { border: 4px solid rgba(255,255,255,0.2); border-top: 4px solid #5cfb6c; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; display: none; margin: 10px auto; }
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+.loading-mode .spinner { display: block; }
+.loading-mode .start-button, .loading-mode .control-row { display: none; }
 </style>
 </head>
-
 <body>
+<div class="container">
+<h1>🎮 Clap Jump - 拍手跳躍</h1>
+<div class="instructions">
+<h3>📖 遊戲說明：</h3>
+<ul>
+<li>👋 <strong>拍手 = 跳躍</strong> (雙手重疊紅點消失就會跳！)</li>
+<li>👆 <strong>點擊畫面 = 跳躍</strong> (如果 AI 卡住，可以直接點螢幕)</li>
+<li>🦖 躲避紅色障礙物，被擊中即結束</li>
+</ul>
+</div>
+<div class="game-area" id="gameArea">
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas"></canvas>
+<div id="startOverlay" class="start-overlay">
+<div class="spinner" id="loadingSpinner"></div>
+<div class="start-hint" id="mainHint">點擊下方啟動相機開始遊戲<br>(需要允許相機權限)</div>
+<div class="status-line" id="startStatus"></div>
+<div class="control-row" id="controlRow">
+<select id="cameraSelect"><option value="">-- 預設鏡頭 --</option></select>
+<button id="refreshCameras" class="small-btn">刷新</button>
+</div>
+<button id="startBtn" class="start-button">開始遊戲</button>
+<button id="retryBtn" class="small-btn" style="display:none; margin-top: 10px;">重試</button>
+</div>
+<div class="ui">
+<div class="score">得分: <span id="score">0</span></div>
+<div class="info">速度: <span id="speed">1.0</span>x</div>
+</div>
+<div class="detector">
+<div class="detector-item" id="handDetector">👋 等待 AI 啟動...</div>
+</div>
+<div class="game-over" id="gameOver">
+<h2>遊戲結束！</h2>
+<p>最終得分: <span id="finalScore">0</span></p>
+<button onclick="location.reload()">重新開始</button>
+</div>
+</div>
+</div>
 
-<h1>👏 Clap Jump</h1>
-
-<p>拍手即可跳躍躲避障礙物</p>
-
-<button id="startBtn">開始遊戲</button>
-
-<div id="status">等待開始</div>
-
-<br>
-
-<canvas id="game" width="900" height="400"></canvas>
-
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/hands.js"></script>
 <script>
+const videoElement = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const scoreDisplay = document.getElementById('score');
+const speedDisplay = document.getElementById('speed');
+const gameOverDiv = document.getElementById('gameOver');
+const finalScoreDisplay = document.getElementById('finalScore');
+const handDetectorIndicator = document.getElementById('handDetector');
+const startOverlay = document.getElementById('startOverlay');
+const startBtn = document.getElementById('startBtn');
+const retryBtn = document.getElementById('retryBtn');
+const startStatus = document.getElementById('startStatus');
+const cameraSelect = document.getElementById('cameraSelect');
+const gameArea = document.getElementById('gameArea');
+const mainHint = document.getElementById('mainHint');
 
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
+const GRAVITY = 0.6;
+const DINO_WIDTH = 40;
+const DINO_HEIGHT = 40;
+const OBSTACLE_WIDTH = 30;
+const OBSTACLE_HEIGHT = 50;
 
-const statusText = document.getElementById("status");
-
+let GROUND_Y = 0;
+let hands = null;
 let gameRunning = false;
-
+let isAiProcessing = false;
 let score = 0;
-let speed = 5;
-
-const player = {
-    x:80,
-    y:300,
-    w:40,
-    h:40,
-    vy:0,
-    jumping:false
-};
-
-const gravity = 0.7;
-const ground = 300;
-
+let gameSpeed = 1;
 let obstacles = [];
+let obstacleSpawnCounter = 0;
+let obstacleSpawnRate = 120;
 
-function jump(){
+let dinoX = 40;
+let dinoY = 0;
+let dinoVelocityY = 0;
+let isJumping = false;
+let lastJumpTime = 0;
+const JUMP_COOLDOWN = 300;
 
-    if(!player.jumping){
+let mediaStream = null;
+let currentHands = [];
+let lastTwoHandsTime = 0;
 
-        player.vy = -14;
-        player.jumping = true;
+function resizeCanvas() {
+canvas.width = canvas.parentElement.offsetWidth;
+canvas.height = canvas.parentElement.offsetHeight;
+GROUND_Y = canvas.height - 60;
+if (!isJumping) dinoY = GROUND_Y;
+}
+window.addEventListener('resize', resizeCanvas);
 
-    }
+class Obstacle {
+constructor() {
+this.x = canvas.width;
+this.y = GROUND_Y + DINO_HEIGHT - OBSTACLE_HEIGHT;
+this.width = OBSTACLE_WIDTH;
+this.height = OBSTACLE_HEIGHT;
+this.speed = 5 * gameSpeed;
+}
+update() { this.x -= this.speed; }
+draw() {
+ctx.fillStyle = '#ff6b6b';
+ctx.fillRect(this.x, this.y, this.width, this.height);
+}
+isOffScreen() { return this.x + this.width < 0; }
+collidesWith(dx, dy, dw, dh) {
+return (dx < this.x + this.width && dx + dw > this.x && dy < this.y + this.height && dy + dh > this.y);
+}
 }
 
-function updatePlayer(){
-
-    player.vy += gravity;
-    player.y += player.vy;
-
-    if(player.y >= ground){
-
-        player.y = ground;
-        player.vy = 0;
-        player.jumping = false;
-
-    }
+async function listCameras() {
+if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+try {
+const devices = await navigator.mediaDevices.enumerateDevices();
+const cams = devices.filter(d => d.kind === 'videoinput');
+cameraSelect.innerHTML = '';
+if(cams.length === 0) {
+const opt = document.createElement('option');
+opt.value = "";
+opt.textContent = "預設鏡頭";
+cameraSelect.appendChild(opt);
+return;
 }
-
-function drawPlayer(){
-
-    ctx.fillStyle = "#5cfb6c";
-
-    ctx.fillRect(
-        player.x,
-        player.y,
-        player.w,
-        player.h
-    );
-}
-
-function spawnObstacle(){
-
-    obstacles.push({
-        x:canvas.width,
-        y:290,
-        w:30,
-        h:50
-    });
-
-}
-
-function updateObstacles(){
-
-    for(let i=obstacles.length-1;i>=0;i--){
-
-        obstacles[i].x -= speed;
-
-        if(obstacles[i].x < -50){
-
-            obstacles.splice(i,1);
-
-            score++;
-
-            if(score % 5 === 0){
-
-                speed += 0.5;
-
-            }
-        }
-    }
-}
-
-function drawObstacles(){
-
-    ctx.fillStyle="#ff6b6b";
-
-    obstacles.forEach(o=>{
-
-        ctx.fillRect(
-            o.x,
-            o.y,
-            o.w,
-            o.h
-        );
-
-    });
-
-}
-
-function checkCollision(){
-
-    for(let o of obstacles){
-
-        if(
-            player.x < o.x + o.w &&
-            player.x + player.w > o.x &&
-            player.y < o.y + o.h &&
-            player.y + player.h > o.y
-        ){
-
-            gameRunning = false;
-
-            alert(
-                "遊戲結束！得分：" + score
-            );
-
-            location.reload();
-
-        }
-    }
-}
-
-let spawnCounter = 0;
-
-function gameLoop(){
-
-    if(!gameRunning) return;
-
-    ctx.clearRect(
-        0,
-        0,
-        canvas.width,
-        canvas.height
-    );
-
-    ctx.strokeStyle="#555";
-
-    ctx.beginPath();
-    ctx.moveTo(0,340);
-    ctx.lineTo(canvas.width,340);
-    ctx.stroke();
-
-    spawnCounter++;
-
-    if(spawnCounter > 100){
-
-        spawnObstacle();
-        spawnCounter = 0;
-
-    }
-
-    updatePlayer();
-    updateObstacles();
-
-    drawPlayer();
-    drawObstacles();
-
-    checkCollision();
-
-    ctx.fillStyle="white";
-    ctx.font="24px Arial";
-    ctx.fillText(
-        "Score: " + score,
-        20,
-        40
-    );
-
-    requestAnimationFrame(gameLoop);
-}
-
-async function startMic(){
-
-    const stream =
-        await navigator.mediaDevices.getUserMedia({
-            audio:true
-        });
-
-    const audioContext =
-        new AudioContext();
-
-    const source =
-        audioContext.createMediaStreamSource(
-            stream
-        );
-
-    const analyser =
-        audioContext.createAnalyser();
-
-    analyser.fftSize = 256;
-
-    source.connect(analyser);
-
-    const data =
-        new Uint8Array(
-            analyser.frequencyBinCount
-        );
-
-    function detectClap(){
-
-        analyser.getByteFrequencyData(
-            data
-        );
-
-        let volume = 0;
-
-        for(let i=0;i<data.length;i++){
-
-            volume += data[i];
-
-        }
-
-        volume /= data.length;
-
-        if(volume > 70){
-
-            jump();
-
-        }
-
-        requestAnimationFrame(
-            detectClap
-        );
-    }
-
-    detectClap();
-}
-
-document
-.getElementById("startBtn")
-.addEventListener("click",async()=>{
-
-    await startMic();
-
-    statusText.textContent =
-        "拍手開始遊戲！";
-
-    gameRunning = true;
-
-    gameLoop();
-
+cams.forEach((c, idx) => {
+const opt = document.createElement('option');
+opt.value = c.deviceId;
+opt.textContent = c.label || `Camera ${idx+1}`;
+cameraSelect.appendChild(opt);
 });
+} catch (err) { console.error(err); }
+}
 
-document.addEventListener(
-    "keydown",
-    e=>{
-        if(e.code==="Space"){
-            jump();
-        }
-    }
-);
+async function initHands() {
+hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/${file}` });
+hands.setOptions({ maxNumHands: 2, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5, modelComplexity: 0 });
+hands.onResults(onHandsResults);
+}
 
-canvas.addEventListener(
-    "click",
-    jump
-);
+function handCenter(landmarks) {
+let sumX = 0, sumY = 0;
+for (let lm of landmarks) { sumX += lm.x; sumY += lm.y; }
+return {
+x: (1 - (sumX / landmarks.length)) * canvas.width,
+y: (sumY / landmarks.length) * canvas.height
+};
+}
 
-</script>
+function onHandsResults(results) {
+if (!gameRunning) return;
+currentHands = [];
+const handCount = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+if (handCount === 2) {
+lastTwoHandsTime = Date.now();
+const center1 = handCenter(results.multiHandLandmarks[0]);
+const center2 = handCenter(results.multiHandLandmarks[1]);
+currentHands.push(center1, center2);
+const dx = center1.x - center2.x;
+const dy = center1.y - center2.y;
+const dist = Math.sqrt(dx * dx + dy * dy);
+handDetectorIndicator.textContent = `👋 看到雙手了`;
+handDetectorIndicator.classList.remove('active');
+if (dist < 180) {
+handDetectorIndicator.textContent = `👏 拍手成功！`;
+handDetectorIndicator.classList.add('active');
+jump();
+}
+}
+else {
+if (handCount === 1) currentHands.push(handCenter(results.multiHandLandmarks[0]));
+handDetectorIndicator.textContent = `🤚 偵測中 (數量: ${handCount})`;
+if (Date.now() - lastTwoHandsTime < 400 && lastTwoHandsTime !== 0) {
+lastTwoHandsTime = 0;
+handDetectorIndicator.textContent = `👏 拍手成功！`;
+handDetectorIndicator.classList.add('active');
+jump();
+} else {
+handDetectorIndicator.classList.remove('active');
+}
+}
+}
 
-</body>
-</html>
+function jump() {
+const now = Date.now();
+if (now - lastJumpTime > JUMP_COOLDOWN && !isJumping) {
+dinoVelocityY = -13;
+isJumping = true;
+lastJumpTime = now;
+}
+}
+
+gameArea.addEventListener('touchstart
