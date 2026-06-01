@@ -26,7 +26,6 @@
       .instructions h3 { color: #5cfb6c; margin-bottom: 8px; }
       .instructions ul { margin-left: 20px; }
       
-      /* 載入動畫相關的 CSS */
       .start-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.85); z-index: 300; flex-direction: column; gap: 12px; padding: 20px; text-align: center; transition: opacity 0.3s; }
       .start-overlay.hidden { display: none; opacity: 0; }
       .start-button { padding: 14px 24px; font-size: 1.1rem; background: #5cfb6c; color: #111; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; max-width: 250px; }
@@ -36,4 +35,388 @@
       select { padding: 8px; border-radius: 6px; background: #333; color: white; border: 1px solid #555; max-width: 200px; }
       .control-row { margin-top: 8px; display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap;}
       
-      .spinner { border: 4px solid rgba(255,255,255,0.2); border-top: 4px solid #5cfb6c; border-radius: 50%;
+      .spinner { border: 4px solid rgba(255,255,255,0.2); border-top: 4px solid #5cfb6c; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; display: none; margin: 10px auto; }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      .loading-mode .spinner { display: block; }
+      .loading-mode .start-button, .loading-mode .control-row { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🎮 Clap Jump - 拍手跳躍</h1>
+      
+      <div class="instructions">
+        <h3>📖 遊戲說明：</h3>
+        <ul>
+          <li>👋 <strong>拍手 = 跳躍</strong> (雙手重疊紅點消失就會跳！)</li>
+          <li>👆 <strong>點擊畫面 = 跳躍</strong> (如果 AI 卡住，可以直接點螢幕)</li>
+          <li>🦖 躲避紅色障礙物，被擊中即結束</li>
+        </ul>
+      </div>
+
+      <div class="game-area" id="gameArea">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas"></canvas>
+
+        <div id="startOverlay" class="start-overlay">
+          <div class="spinner" id="loadingSpinner"></div>
+          <div class="start-hint" id="mainHint">點擊下方啟動相機開始遊戲<br>(需要允許相機權限)</div>
+          <div class="status-line" id="startStatus"></div>
+          
+          <div class="control-row" id="controlRow">
+            <select id="cameraSelect"></select>
+            <button id="refreshCameras" class="small-btn">刷新</button>
+          </div>
+          <button id="startBtn" class="start-button">開始遊戲</button>
+          <button id="retryBtn" class="small-btn" style="display:none; margin-top: 10px;">重試</button>
+        </div>
+
+        <div class="ui">
+          <div class="score">得分: <span id="score">0</span></div>
+          <div class="info">速度: <span id="speed">1.0</span>x</div>
+        </div>
+        <div class="detector">
+          <div class="detector-item" id="handDetector">👋 等待 AI 啟動...</div>
+        </div>
+        <div class="game-over" id="gameOver">
+          <h2>遊戲結束！</h2>
+          <p>最終得分: <span id="finalScore">0</span></p>
+          <button onclick="location.reload()">重新開始</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/hands.js"></script>
+    <script>
+      const videoElement = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      const scoreDisplay = document.getElementById('score');
+      const speedDisplay = document.getElementById('speed');
+      const gameOverDiv = document.getElementById('gameOver');
+      const finalScoreDisplay = document.getElementById('finalScore');
+      const handDetectorIndicator = document.getElementById('handDetector');
+      const startOverlay = document.getElementById('startOverlay');
+      const startBtn = document.getElementById('startBtn');
+      const retryBtn = document.getElementById('retryBtn');
+      const startStatus = document.getElementById('startStatus');
+      const cameraSelect = document.getElementById('cameraSelect');
+      const gameArea = document.getElementById('gameArea');
+      const mainHint = document.getElementById('mainHint');
+
+      const GRAVITY = 0.6;
+      const DINO_WIDTH = 40;
+      const DINO_HEIGHT = 40;
+      const OBSTACLE_WIDTH = 30;
+      const OBSTACLE_HEIGHT = 50;
+
+      let GROUND_Y = 0; 
+      let hands = null;
+      let gameRunning = false;
+      let isAiProcessing = false; // 控制 AI 頻率的開關
+      let score = 0;
+      let gameSpeed = 1;
+      let obstacles = [];
+      let obstacleSpawnCounter = 0;
+      let obstacleSpawnRate = 120; 
+
+      let dinoX = 40;
+      let dinoY = 0;
+      let dinoVelocityY = 0;
+      let isJumping = false;
+      let lastJumpTime = 0;
+      const JUMP_COOLDOWN = 300; 
+
+      let mediaStream = null;
+      let currentHands = []; 
+      let lastTwoHandsTime = 0; 
+
+      function resizeCanvas() {
+        canvas.width = canvas.parentElement.offsetWidth;
+        canvas.height = canvas.parentElement.offsetHeight;
+        GROUND_Y = canvas.height - 60; 
+        if (!isJumping) dinoY = GROUND_Y;
+      }
+      window.addEventListener('resize', resizeCanvas);
+
+      class Obstacle {
+        constructor() {
+          this.x = canvas.width;
+          this.y = GROUND_Y + DINO_HEIGHT - OBSTACLE_HEIGHT;
+          this.width = OBSTACLE_WIDTH;
+          this.height = OBSTACLE_HEIGHT;
+          this.speed = 5 * gameSpeed;
+        }
+        update() { this.x -= this.speed; }
+        draw() {
+          ctx.fillStyle = '#ff6b6b';
+          ctx.fillRect(this.x, this.y, this.width, this.height);
+        }
+        isOffScreen() { return this.x + this.width < 0; }
+        collidesWith(dx, dy, dw, dh) {
+          return (dx < this.x + this.width && dx + dw > this.x && dy < this.y + this.height && dy + dh > this.y);
+        }
+      }
+
+      async function listCameras() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const cams = devices.filter(d => d.kind === 'videoinput');
+          cameraSelect.innerHTML = '';
+          cams.forEach((c, idx) => {
+            const opt = document.createElement('option');
+            opt.value = c.deviceId;
+            opt.textContent = c.label || `Camera ${idx+1}`;
+            cameraSelect.appendChild(opt);
+          });
+        } catch (err) { console.error(err); }
+      }
+
+      async function initHands() {
+        hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/${file}` });
+        // 手機端極致壓縮效能：modelComplexity 為 0
+        hands.setOptions({ maxNumHands: 2, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5, modelComplexity: 0 });
+        hands.onResults(onHandsResults);
+      }
+
+      function handCenter(landmarks) {
+        let sumX = 0, sumY = 0;
+        for (let lm of landmarks) { sumX += lm.x; sumY += lm.y; }
+        return { 
+            x: (1 - (sumX / landmarks.length)) * canvas.width, 
+            y: (sumY / landmarks.length) * canvas.height 
+        };
+      }
+
+      function onHandsResults(results) {
+        if (!gameRunning) return; 
+        
+        currentHands = [];
+        const handCount = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+
+        if (handCount === 2) {
+          lastTwoHandsTime = Date.now(); 
+          const center1 = handCenter(results.multiHandLandmarks[0]);
+          const center2 = handCenter(results.multiHandLandmarks[1]);
+          currentHands.push(center1, center2);
+
+          const dx = center1.x - center2.x;
+          const dy = center1.y - center2.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          handDetectorIndicator.textContent = `👋 看到雙手了`;
+          handDetectorIndicator.classList.remove('active');
+
+          if (dist < 180) {
+            handDetectorIndicator.textContent = `👏 拍手成功！`;
+            handDetectorIndicator.classList.add('active');
+            jump();
+          }
+        } 
+        else {
+          if (handCount === 1) currentHands.push(handCenter(results.multiHandLandmarks[0]));
+          handDetectorIndicator.textContent = `🤚 偵測中 (數量: ${handCount})`;
+
+          // 判斷拍手：原本有兩隻手，突然少於兩隻 (且發生在 0.4 秒內)
+          if (Date.now() - lastTwoHandsTime < 400 && lastTwoHandsTime !== 0) {
+            lastTwoHandsTime = 0; 
+            handDetectorIndicator.textContent = `👏 拍手成功！`;
+            handDetectorIndicator.classList.add('active');
+            jump();
+          } else {
+            handDetectorIndicator.classList.remove('active');
+          }
+        }
+      }
+
+      function jump() { 
+        const now = Date.now(); 
+        if (now - lastJumpTime > JUMP_COOLDOWN && !isJumping) { 
+          dinoVelocityY = -13; 
+          isJumping = true; 
+          lastJumpTime = now; 
+        } 
+      }
+
+      gameArea.addEventListener('touchstart', (e) => { e.preventDefault(); if (gameRunning) jump(); });
+      gameArea.addEventListener('mousedown', () => { if (gameRunning) jump(); });
+
+      function updateDino() { 
+        dinoVelocityY += GRAVITY; 
+        dinoY += dinoVelocityY; 
+        if (dinoY >= GROUND_Y) { 
+          dinoY = GROUND_Y; 
+          dinoVelocityY = 0; 
+          isJumping = false; 
+        } 
+      }
+
+      function drawDino() { 
+        ctx.fillStyle = '#5cfb6c'; 
+        ctx.fillRect(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT); 
+        ctx.strokeStyle = '#00ff00'; 
+        ctx.lineWidth = 2; 
+        ctx.strokeRect(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT); 
+        ctx.fillStyle = '#000'; 
+        ctx.fillRect(dinoX + 25, dinoY + 8, 6, 6); 
+      }
+
+      function checkCollisions() { 
+        for (let i = obstacles.length - 1; i >= 0; i--) { 
+          if (obstacles[i].collidesWith(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT)) { 
+            endGame(); return; 
+          } 
+        } 
+      }
+
+      function endGame() { 
+        gameRunning = false; 
+        finalScoreDisplay.textContent = score; 
+        gameOverDiv.style.display = 'block'; 
+      }
+
+      // 🛑 核心優化：獨立的 AI 降頻迴圈 (保護手機 CPU)
+      async function aiLoop() {
+        if (!gameRunning) return;
+        
+        // 只有在前一次算完，而且相機有畫面時才丟新的畫面給 AI
+        if (!isAiProcessing && videoElement.readyState >= 2) {
+          isAiProcessing = true;
+          try {
+            await hands.send({image: videoElement});
+          } catch (err) {
+            console.error('AI 錯誤:', err);
+          }
+          isAiProcessing = false;
+        }
+        
+        // 強制暫停 60 毫秒再跑下一次 (大約一秒只算 15 次，降低發熱與卡頓)
+        setTimeout(aiLoop, 60);
+      }
+
+      // 🏃‍♂️ 遊戲視覺迴圈 (保持 60FPS 順暢)
+      function gameLoop() { 
+        if (!gameRunning) return; 
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height); 
+        
+        ctx.strokeStyle = '#444'; 
+        ctx.lineWidth = 2; 
+        ctx.beginPath(); 
+        ctx.moveTo(0, GROUND_Y + DINO_HEIGHT); 
+        ctx.lineTo(canvas.width, GROUND_Y + DINO_HEIGHT); 
+        ctx.stroke(); 
+
+        obstacleSpawnCounter++; 
+        if (obstacleSpawnCounter > obstacleSpawnRate) { 
+          obstacles.push(new Obstacle()); 
+          obstacleSpawnCounter = 0; 
+          obstacleSpawnRate = Math.max(60, 120 - score * 3); 
+        } 
+
+        for (let i = obstacles.length - 1; i >= 0; i--) { 
+          obstacles[i].update(); 
+          obstacles[i].draw(); 
+          if (obstacles[i].isOffScreen()) { 
+            obstacles.splice(i, 1); 
+            score++; 
+            scoreDisplay.textContent = score; 
+            if (score % 5 === 0) { 
+              gameSpeed += 0.2; 
+              speedDisplay.textContent = gameSpeed.toFixed(1); 
+            } 
+          } 
+        } 
+        
+        updateDino(); 
+        drawDino(); 
+
+        // 畫紅點
+        ctx.fillStyle = 'rgba(255, 80, 80, 0.8)';
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        for (let pt of currentHands) {
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 12, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+
+        checkCollisions(); 
+        requestAnimationFrame(gameLoop); 
+      }
+
+      async function initCamera(deviceId = null) {
+        try {
+          const constraints = deviceId 
+            ? { video: { deviceId: { exact: deviceId }, width: {ideal: 640}, height: {ideal: 480} } } 
+            : { video: { facingMode: 'user', width: {ideal: 640}, height: {ideal: 480} } }; 
+
+          if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+          
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          mediaStream = stream;
+          videoElement.srcObject = stream;
+          
+          await new Promise((resolve) => { videoElement.onloadedmetadata = () => { resolve(); }; });
+          await videoElement.play();
+          
+          await listCameras();
+          return true;
+        } catch (err) {
+          startOverlay.classList.remove('loading-mode');
+          startStatus.textContent = '無法啟動相機: ' + err.name;
+          retryBtn.style.display = 'inline-block';
+          return false;
+        }
+      }
+
+      async function startGameAfterCamera() {
+        startOverlay.classList.add('loading-mode');
+        mainHint.innerHTML = '正在從網路下載 AI 模組 (約 5MB)<br>請保持網路暢通，手機預熱需數秒鐘...';
+        startStatus.textContent = '模型下載中 ⏳';
+        
+        await initHands();
+        
+        // 喚醒 AI
+        try {
+          startStatus.textContent = '系統預熱中 (畫面可能會短暫卡頓) 🔥';
+          await hands.send({image: videoElement}); 
+        } catch(e) {
+          console.log("預熱略過");
+        }
+
+        // 準備完成，開跑！
+        startOverlay.classList.add('hidden');
+        resizeCanvas();
+        gameRunning = true;
+        handDetectorIndicator.textContent = '🟢 系統就緒，準備拍手！';
+        
+        // 兩個迴圈分開跑
+        aiLoop(); 
+        gameLoop();
+      }
+
+      async function startButtonHandler() {
+        startOverlay.classList.add('loading-mode');
+        mainHint.textContent = '正在請求相機權限...';
+        
+        const selected = cameraSelect.value || null;
+        const ok = await initCamera(selected);
+        if (ok) {
+          await startGameAfterCamera();
+        }
+      }
+
+      startBtn.addEventListener('click', startButtonHandler);
+      document.getElementById('refreshCameras').addEventListener('click', listCameras);
+      retryBtn.addEventListener('click', startButtonHandler);
+
+      window.addEventListener('load', async () => {
+        resizeCanvas();
+        await listCameras();
+      });
+    </script>
+  </body>
+</html>
