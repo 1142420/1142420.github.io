@@ -1,1 +1,77 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clap Detector (Browser)</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #111; color: #eee; margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+      video, canvas { border: 2px solid #444; border-radius: 8px; max-width: 100%; }
+      #status { margin-top: 16px; font-size: 2rem; font-weight: 700; }
+      .clap { color: #5cfb6c; }
+      .wait { color: #f55; }
+      .hint { margin-top: 8px; color: #bbb; }
+    </style>
+  </head>
+  <body>
+    <h1>Clap Detector (Browser)</h1>
+    <video id="video" autoplay playsinline width="640" height="480"></video>
+    <div id="status" class="wait">等待偵測...</div>
+    <div class="hint">按下「允許」後，對著鏡頭拍手。</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script>
+      const videoElement = document.getElementById('video');
+      const statusEl = document.getElementById('status');
+      const hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+
+      hands.setOptions({
+        maxNumHands: 2,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.7
+      });
+
+      function distanceBetween(pointA, pointB) {
+        return Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
+      }
+
+      function updateStatus(clap) {
+        if (clap) {
+          statusEl.textContent = 'CLAP!';
+          statusEl.className = 'clap';
+        } else {
+          statusEl.textContent = 'WAIT';
+          statusEl.className = 'wait';
+        }
+      }
+
+      hands.onResults((results) => {
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length === 2) {
+          const hand1 = results.multiHandLandmarks[0][0];
+          const hand2 = results.multiHandLandmarks[1][0];
+          const dist = distanceBetween(hand1, hand2);
+          updateStatus(dist < 0.12);
+        } else {
+          updateStatus(false);
+        }
+      });
+
+      const camera = new Camera(videoElement, {
+        onFrame: async () => {
+          await hands.send({ image: videoElement });
+        },
+        width: 640,
+        height: 480
+      });
+
+      camera.start().catch((err) => {
+        statusEl.textContent = '無法啟動攝影機：' + err.message;
+        statusEl.className = 'wait';
+      });
+    </script>
+  </body>
+</html>
 
