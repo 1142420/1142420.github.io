@@ -6,73 +6,149 @@
     <title>Clap Detector (Browser)</title>
     <style>
       body { font-family: Arial, sans-serif; background: #111; color: #eee; margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
-      video { border: 2px solid #444; border-radius: 8px; max-width: 100%; width: 640px; height: auto; }
-      #status { margin-top: 16px; font-size: 2rem; font-weight: 700; }
-      #debug { margin-top: 8px; font-size: 0.9rem; color: #888; max-width: 600px; line-height: 1.5; font-family: monospace; }
+      .container { max-width: 700px; width: 100%; }
+      video { border: 2px solid #444; border-radius: 8px; width: 100%; height: auto; }
+      canvas { display: none; }
+      #status { margin-top: 16px; font-size: 2rem; font-weight: 700; text-align: center; }
+      #debug { margin-top: 8px; font-size: 0.85rem; color: #888; line-height: 1.6; font-family: monospace; text-align: center; }
+      .hint { margin-top: 8px; color: #bbb; text-align: center; font-size: 0.9rem; }
+      .mode-selector { margin-top: 16px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+      button { padding: 10px 16px; background: #333; color: #eee; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 0.9rem; transition: all 0.2s; }
+      button:hover { background: #444; border-color: #777; }
+      button.active { background: #5cfb6c; color: #111; border-color: #5cfb6c; }
+      .mode-indicator { margin-top: 12px; padding: 8px; background: #222; border-radius: 4px; font-size: 0.85rem; color: #aaa; }
       .clap { color: #5cfb6c; }
       .wait { color: #f55; }
-      .hint { margin-top: 8px; color: #bbb; }
     </style>
   </head>
   <body>
-    <h1>Clap Detector (Browser)</h1>
-    <video id="video" autoplay playsinline></video>
-    <div id="status" class="wait">初始化中...</div>
-    <div id="debug"></div>
-    <div class="hint">按下「允許」後，對著鏡頭拍手。</div>
+    <div class="container">
+      <h1>Clap Detector (Browser)</h1>
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas"></canvas>
+      <div id="status" class="wait">初始化中...</div>
+      <div id="debug"></div>
+      <div class="hint">選擇偵測模式，對著鏡頭拍手</div>
+      
+      <div class="mode-selector">
+        <button id="btnHands" onclick="switchMode('hands')" class="active">🤲 Hand Detection</button>
+        <button id="btnPose" onclick="switchMode('pose')">🧍 Pose Detection</button>
+        <button id="btnAudio" onclick="switchMode('audio')">🎤 Audio Detection</button>
+        <button id="btnHybrid" onclick="switchMode('hybrid')">🔀 Hybrid Mode</button>
+      </div>
+      
+      <div class="mode-indicator" id="modeIndicator">
+        🤲 Hand Detection - 偵測兩隻手的距離
+      </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@latest/pose.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
     <script>
       const videoElement = document.getElementById('video');
+      const canvasElement = document.getElementById('canvas');
       const statusEl = document.getElementById('status');
       const debugEl = document.getElementById('debug');
+      const modeIndicator = document.getElementById('modeIndicator');
       
       let hands = null;
-      let cameraRunning = false;
+      let pose = null;
+      let isProcessing = false;
       let lastClapTime = 0;
-      const CLAP_COOLDOWN = 300; // ms
-      const DISTANCE_THRESHOLD = 0.25; // 增加到 0.25
+      const CLAP_COOLDOWN = 300;
+      const DISTANCE_THRESHOLD = 0.25;
+      let currentMode = 'hands';
+      
+      // 用於音頻偵測
+      let audioContext = null;
+      let analyser = null;
+      let dataArray = null;
+      let mediaStream = null;
 
-      // 創建音效
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      // 音效
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       
       function playSound() {
-        const now = audioContext.currentTime;
-        const osc = audioContext.createOscillator();
-        const gain = audioContext.createGain();
-        
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
         osc.connect(gain);
-        gain.connect(audioContext.destination);
-        
+        gain.connect(audioCtx.destination);
         osc.frequency.setValueAtTime(800, now);
         osc.frequency.exponentialRampToValueAtTime(200, now + 0.1);
         gain.gain.setValueAtTime(0.3, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-        
         osc.start(now);
         osc.stop(now + 0.1);
       }
 
-      async function setupCamera() {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
-          });
-          
-          videoElement.srcObject = stream;
-          
-          return new Promise(resolve => {
-            videoElement.onloadedmetadata = () => {
-              videoElement.play();
-              cameraRunning = true;
-              resolve();
-            };
-          });
-        } catch (err) {
-          debugEl.textContent = `❌ 相機錯誤: ${err.message}`;
-          statusEl.textContent = '無法使用相機';
-          console.error('Camera error:', err);
-          throw err;
+      function triggerClap() {
+        const now = Date.now();
+        if (now - lastClapTime > CLAP_COOLDOWN) {
+          statusEl.textContent = 'CLAP! 🎉';
+          statusEl.className = 'clap';
+          playSound();
+          lastClapTime = now;
+          setTimeout(() => {
+            statusEl.textContent = '等待偵測...';
+            statusEl.className = 'wait';
+          }, 500);
+        }
+      }
+
+      async function initHands() {
+        if (hands) return;
+        hands = new Hands({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/${file}`
+        });
+        hands.setOptions({
+          maxNumHands: 2,
+          minDetectionConfidence: 0.3,
+          minTrackingConfidence: 0.3,
+          modelComplexity: 0
+        });
+      }
+
+      async function initPose() {
+        if (pose) return;
+        pose = new Pose({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@latest/${file}`
+        });
+        pose.setOptions({
+          modelComplexity: 0,
+          minDetectionConfidence: 0.3,
+          minTrackingConfidence: 0.3
+        });
+      }
+
+      function setupAudio(stream) {
+        if (audioContext) return;
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamAudioSource(stream);
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
+      }
+
+      function detectAudioClap() {
+        if (!analyser || !dataArray) return false;
+        analyser.getByteFrequencyData(dataArray);
+        
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const average = sum / dataArray.length;
+        
+        // 如果音量超過閾值，判定為拍手
+        if (average > 80) {
+          debugEl.textContent = `🎤 音量: ${average.toFixed(0)} (偵測到!)`;
+          return true;
+        } else {
+          debugEl.textContent = `🎤 音量: ${average.toFixed(0)}`;
+          return false;
         }
       }
 
@@ -83,10 +159,7 @@
           sumX += lm.x;
           sumY += lm.y;
         }
-        return { 
-          x: sumX / landmarks.length, 
-          y: sumY / landmarks.length 
-        };
+        return { x: sumX / landmarks.length, y: sumY / landmarks.length };
       }
 
       function distanceBetween(p1, p2) {
@@ -96,93 +169,241 @@
         return Math.sqrt(dx * dx + dy * dy);
       }
 
-      async function processFrame() {
-        if (!cameraRunning || !hands) {
-          requestAnimationFrame(processFrame);
+      function getWristPosition(poseLandmarks) {
+        // 15 = 左手腕, 16 = 右手腕
+        if (poseLandmarks && poseLandmarks.length > 16) {
+          return {
+            left: poseLandmarks[15],
+            right: poseLandmarks[16]
+          };
+        }
+        return null;
+      }
+
+      async function processHandsFrame() {
+        if (!hands || isProcessing) {
+          requestAnimationFrame(processHandsFrame);
           return;
         }
 
+        isProcessing = true;
         try {
           const results = await hands.process(videoElement);
           
-          if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            if (results.multiHandLandmarks.length === 2) {
-              const center1 = handCenter(results.multiHandLandmarks[0]);
-              const center2 = handCenter(results.multiHandLandmarks[1]);
-              const dist = distanceBetween(center1, center2);
-              
+          if (results.multiHandLandmarks && results.multiHandLandmarks.length === 2) {
+            const center1 = handCenter(results.multiHandLandmarks[0]);
+            const center2 = handCenter(results.multiHandLandmarks[1]);
+            const dist = distanceBetween(center1, center2);
+            
+            const distPercent = (dist * 100).toFixed(1);
+            debugEl.textContent = `🤲 偵測到 2 隻手 | 距離: ${distPercent}% (閾值: 25%)`;
+            
+            if (dist < DISTANCE_THRESHOLD) {
+              triggerClap();
+            } else {
+              statusEl.textContent = '等待偵測...';
+              statusEl.className = 'wait';
+            }
+          } else {
+            const count = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+            debugEl.textContent = `🤲 偵測到 ${count} 隻手 (需要 2 隻)`;
+            statusEl.textContent = '等待偵測...';
+            statusEl.className = 'wait';
+          }
+        } catch (err) {
+          console.error('Hands error:', err);
+        }
+        
+        isProcessing = false;
+        requestAnimationFrame(processHandsFrame);
+      }
+
+      async function processPoseFrame() {
+        if (!pose || isProcessing) {
+          requestAnimationFrame(processPoseFrame);
+          return;
+        }
+
+        isProcessing = true;
+        try {
+          const results = await pose.process(videoElement);
+          
+          if (results.poseLandmarks && results.poseLandmarks.length > 0) {
+            const wrists = getWristPosition(results.poseLandmarks);
+            
+            if (wrists && wrists.left && wrists.right) {
+              const dist = distanceBetween(wrists.left, wrists.right);
               const distPercent = (dist * 100).toFixed(1);
-              const thresholdPercent = (DISTANCE_THRESHOLD * 100).toFixed(1);
-              debugEl.textContent = `📊 距離: ${distPercent}% (閾值: ${thresholdPercent}%)`;
               
-              if (dist < DISTANCE_THRESHOLD) {
-                const now = Date.now();
-                if (now - lastClapTime > CLAP_COOLDOWN) {
-                  statusEl.textContent = 'CLAP! 🎉';
-                  statusEl.className = 'clap';
-                  playSound();
-                  lastClapTime = now;
-                  
-                  // 0.5秒後恢復
-                  setTimeout(() => {
-                    statusEl.textContent = '等待偵測...';
-                    statusEl.className = 'wait';
-                  }, 500);
-                }
+              // 檢查手腕的可見度
+              const leftVis = wrists.left.visibility || 0;
+              const rightVis = wrists.right.visibility || 0;
+              
+              debugEl.textContent = `🧍 姿態偵測 | 手腕距離: ${distPercent}% | 可見度: L:${(leftVis*100).toFixed(0)}% R:${(rightVis*100).toFixed(0)}%`;
+              
+              if (leftVis > 0.5 && rightVis > 0.5 && dist < DISTANCE_THRESHOLD) {
+                triggerClap();
               } else {
                 statusEl.textContent = '等待偵測...';
                 statusEl.className = 'wait';
               }
             } else {
-              debugEl.textContent = `👋 偵測到 ${results.multiHandLandmarks.length} 隻手 (需要 2 隻)`;
-              statusEl.textContent = '等待偵測...';
-              statusEl.className = 'wait';
+              debugEl.textContent = `🧍 偵測到姿態，但看不到手腕`;
             }
           } else {
-            debugEl.textContent = '⏳ 沒有偵測到手...';
+            debugEl.textContent = `🧍 沒有偵測到姿態`;
+          }
+        } catch (err) {
+          console.error('Pose error:', err);
+        }
+        
+        isProcessing = false;
+        requestAnimationFrame(processPoseFrame);
+      }
+
+      async function processAudioFrame() {
+        if (detectAudioClap()) {
+          triggerClap();
+        }
+        requestAnimationFrame(processAudioFrame);
+      }
+
+      async function processHybridFrame() {
+        if (isProcessing) {
+          requestAnimationFrame(processHybridFrame);
+          return;
+        }
+
+        isProcessing = true;
+        try {
+          let clapDetected = false;
+          let debugInfo = [];
+
+          // 手部偵測
+          if (hands) {
+            const handsResults = await hands.process(videoElement);
+            if (handsResults.multiHandLandmarks && handsResults.multiHandLandmarks.length === 2) {
+              const center1 = handCenter(handsResults.multiHandLandmarks[0]);
+              const center2 = handCenter(handsResults.multiHandLandmarks[1]);
+              const dist = distanceBetween(center1, center2);
+              if (dist < DISTANCE_THRESHOLD) {
+                clapDetected = true;
+                debugInfo.push(`🤲 手部: 距離 ${(dist*100).toFixed(1)}%`);
+              }
+            }
+          }
+
+          // 姿態偵測
+          if (pose) {
+            const poseResults = await pose.process(videoElement);
+            if (poseResults.poseLandmarks && poseResults.poseLandmarks.length > 0) {
+              const wrists = getWristPosition(poseResults.poseLandmarks);
+              if (wrists && wrists.left && wrists.right) {
+                const dist = distanceBetween(wrists.left, wrists.right);
+                if (dist < DISTANCE_THRESHOLD) {
+                  clapDetected = true;
+                  debugInfo.push(`🧍 姿態: 距離 ${(dist*100).toFixed(1)}%`);
+                }
+              }
+            }
+          }
+
+          // 音頻偵測
+          if (analyser) {
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+              sum += dataArray[i];
+            }
+            const average = sum / dataArray.length;
+            if (average > 80) {
+              clapDetected = true;
+              debugInfo.push(`🎤 音量: ${average.toFixed(0)}`);
+            }
+          }
+
+          debugEl.textContent = `🔀 混合模式 | ${debugInfo.join(' | ')}`;
+
+          if (clapDetected) {
+            triggerClap();
+          } else {
             statusEl.textContent = '等待偵測...';
             statusEl.className = 'wait';
           }
         } catch (err) {
-          console.error('Processing error:', err);
+          console.error('Hybrid error:', err);
         }
-
-        requestAnimationFrame(processFrame);
+        
+        isProcessing = false;
+        requestAnimationFrame(processHybridFrame);
       }
 
-      async function initialize() {
+      async function switchMode(mode) {
+        currentMode = mode;
+        document.querySelectorAll('.mode-selector button').forEach(btn => btn.classList.remove('active'));
+        document.getElementById('btn' + mode.charAt(0).toUpperCase() + mode.slice(1)).classList.add('active');
+        
+        lastClapTime = 0;
+        statusEl.textContent = '初始化中...';
+        
         try {
-          debugEl.textContent = '📱 正在啟動相機...';
-          await setupCamera();
-          
-          debugEl.textContent = '⏳ 正在初始化 MediaPipe Hands...';
-          
-          hands = new Hands({
-            locateFile: (file) => {
-              return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/${file}`;
+          if (mode === 'hands') {
+            await initHands();
+            modeIndicator.textContent = '🤲 Hand Detection - 偵測兩隻手的距離';
+            processHandsFrame();
+          } else if (mode === 'pose') {
+            await initPose();
+            modeIndicator.textContent = '🧍 Pose Detection - 偵測手腕位置';
+            processPoseFrame();
+          } else if (mode === 'audio') {
+            if (!audioContext && mediaStream) {
+              setupAudio(mediaStream);
             }
-          });
-
-          hands.setOptions({
-            maxNumHands: 2,
-            minDetectionConfidence: 0.3,  // 降低到 0.3
-            minTrackingConfidence: 0.3,   // 降低到 0.3
-            modelComplexity: 0
-          });
-
-          debugEl.textContent = '✅ MediaPipe 已初始化，開始偵測中...';
+            modeIndicator.textContent = '🎤 Audio Detection - 偵測拍手聲音';
+            processAudioFrame();
+          } else if (mode === 'hybrid') {
+            await initHands();
+            await initPose();
+            if (!audioContext && mediaStream) {
+              setupAudio(mediaStream);
+            }
+            modeIndicator.textContent = '🔀 Hybrid Mode - 混合三種偵測方式';
+            processHybridFrame();
+          }
+          
           statusEl.textContent = '等待偵測...';
           statusEl.className = 'wait';
-          
-          processFrame();
         } catch (err) {
           debugEl.textContent = `❌ 初始化失敗: ${err.message}`;
-          console.error('Initialization error:', err);
+          console.error('Init error:', err);
+        }
+      }
+
+      async function startCamera() {
+        try {
+          debugEl.textContent = '📱 正在啟動相機...';
+          
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+            audio: true
+          });
+          
+          videoElement.srcObject = mediaStream;
+          videoElement.onloadedmetadata = () => {
+            videoElement.play();
+            switchMode('hands');
+          };
+        } catch (err) {
+          debugEl.textContent = `❌ 相機錯誤: ${err.message}`;
+          statusEl.textContent = '無法使用相機';
+          console.error('Camera error:', err);
         }
       }
 
       window.addEventListener('load', () => {
-        initialize();
+        statusEl.textContent = '按下「允許」以啟動相機';
+        debugEl.textContent = '初始化中...';
+        startCamera();
       });
     </script>
   </body>
