@@ -3,407 +3,288 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Clap Detector (Browser)</title>
+    <title>Clap Dodge - 拍手閃避遊戲</title>
     <style>
-      body { font-family: Arial, sans-serif; background: #111; color: #eee; margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
-      .container { max-width: 700px; width: 100%; }
-      video { border: 2px solid #444; border-radius: 8px; width: 100%; height: auto; }
-      canvas { display: none; }
-      #status { margin-top: 16px; font-size: 2rem; font-weight: 700; text-align: center; }
-      #debug { margin-top: 8px; font-size: 0.85rem; color: #888; line-height: 1.6; font-family: monospace; text-align: center; }
-      .hint { margin-top: 8px; color: #bbb; text-align: center; font-size: 0.9rem; }
-      .mode-selector { margin-top: 16px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-      button { padding: 10px 16px; background: #333; color: #eee; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 0.9rem; transition: all 0.2s; }
-      button:hover { background: #444; border-color: #777; }
-      button.active { background: #5cfb6c; color: #111; border-color: #5cfb6c; }
-      .mode-indicator { margin-top: 12px; padding: 8px; background: #222; border-radius: 4px; font-size: 0.85rem; color: #aaa; }
-      .clap { color: #5cfb6c; }
-      .wait { color: #f55; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; background: #111; color: #eee; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+      .container { max-width: 800px; width: 100%; }
+      h1 { text-align: center; margin-bottom: 16px; }
+      .game-area { position: relative; width: 100%; aspect-ratio: 16/9; background: #1a1a1a; border: 3px solid #444; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+      video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.3; }
+      canvas { position: absolute; top: 0; left: 0; }
+      .ui { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 12px 16px; border-radius: 8px; z-index: 100; }
+      .score { font-size: 1.5rem; font-weight: bold; color: #5cfb6c; }
+      .game-over { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); padding: 40px; border-radius: 12px; text-align: center; z-index: 200; display: none; }
+      .game-over h2 { font-size: 2.5rem; color: #ff6b6b; margin-bottom: 16px; }
+      .game-over p { font-size: 1.2rem; margin-bottom: 12px; }
+      .game-over button { padding: 12px 24px; background: #5cfb6c; color: #111; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: bold; }
+      .game-over button:hover { background: #4de559; }
+      .hand-indicator { position: absolute; bottom: 10px; left: 10px; right: 10px; display: flex; gap: 20px; justify-content: center; z-index: 50; }
+      .hand { padding: 8px 16px; background: rgba(0,0,0,0.7); border-radius: 4px; font-size: 0.9rem; }
+      .hand.active { background: #5cfb6c; color: #111; font-weight: bold; }
+      .instructions { background: #222; padding: 16px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9rem; line-height: 1.6; }
+      .instructions h3 { color: #5cfb6c; margin-bottom: 8px; }
+      .instructions ul { margin-left: 20px; }
+      .instructions li { margin: 4px 0; }
     </style>
   </head>
   <body>
     <div class="container">
-      <h1>Clap Detector (Browser)</h1>
-      <video id="video" autoplay playsinline></video>
-      <canvas id="canvas"></canvas>
-      <div id="status" class="wait">初始化中...</div>
-      <div id="debug"></div>
-      <div class="hint">選擇偵測模式，對著鏡頭拍手</div>
+      <h1>🎮 Clap Dodge - 拍手閃避遊戲</h1>
       
-      <div class="mode-selector">
-        <button id="btnHands" onclick="switchMode('hands')" class="active">🤲 Hand Detection</button>
-        <button id="btnPose" onclick="switchMode('pose')">🧍 Pose Detection</button>
-        <button id="btnAudio" onclick="switchMode('audio')">🎤 Audio Detection</button>
-        <button id="btnHybrid" onclick="switchMode('hybrid')">🔀 Hybrid Mode</button>
+      <div class="instructions">
+        <h3>📖 遊戲說明：</h3>
+        <ul>
+          <li>👋 拍左手 (左手往右移動) → 躲避左邊的障礙物</li>
+          <li>👋 拍右手 (右手往左移動) → 躲避右邊的障礙物</li>
+          <li>🎯 成功躲避得 1 分</li>
+          <li>❌ 被擊中遊戲結束</li>
+        </ul>
       </div>
-      
-      <div class="mode-indicator" id="modeIndicator">
-        🤲 Hand Detection - 偵測兩隻手的距離
+
+      <div class="game-area">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+        <div class="ui">
+          <div class="score">得分: <span id="score">0</span></div>
+        </div>
+        <div class="hand-indicator">
+          <div class="hand" id="leftHand">👈 左手</div>
+          <div class="hand" id="rightHand">右手 👉</div>
+        </div>
+        <div class="game-over" id="gameOver">
+          <h2>遊戲結束！</h2>
+          <p>最終得分: <span id="finalScore">0</span></p>
+          <button onclick="location.reload()">重新開始</button>
+        </div>
       </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/hands.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@latest/pose.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
     <script>
       const videoElement = document.getElementById('video');
-      const canvasElement = document.getElementById('canvas');
-      const statusEl = document.getElementById('status');
-      const debugEl = document.getElementById('debug');
-      const modeIndicator = document.getElementById('modeIndicator');
-      
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      const scoreDisplay = document.getElementById('score');
+      const gameOverDiv = document.getElementById('gameOver');
+      const finalScoreDisplay = document.getElementById('finalScore');
+      const leftHandIndicator = document.getElementById('leftHand');
+      const rightHandIndicator = document.getElementById('rightHand');
+
+      // 設置 canvas
+      canvas.width = canvas.parentElement.offsetWidth;
+      canvas.height = canvas.parentElement.offsetHeight;
+
+      // 遊戲變量
       let hands = null;
-      let pose = null;
-      let isProcessing = false;
-      let lastClapTime = 0;
-      const CLAP_COOLDOWN = 300;
-      const DISTANCE_THRESHOLD = 0.25;
-      let currentMode = 'hands';
-      
-      // 用於音頻偵測
-      let audioContext = null;
-      let analyser = null;
-      let dataArray = null;
-      let mediaStream = null;
+      let gameRunning = true;
+      let score = 0;
+      let playerX = canvas.width / 2;
+      const playerWidth = 60;
+      const playerHeight = 100;
+      let obstacles = [];
+      let obstacleSpawnRate = 0.02;
+      let gameSpeed = 1;
 
-      // 音效
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      
-      function playSound() {
-        const now = audioCtx.currentTime;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.frequency.setValueAtTime(800, now);
-        osc.frequency.exponentialRampToValueAtTime(200, now + 0.1);
-        gain.gain.setValueAtTime(0.3, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-        osc.start(now);
-        osc.stop(now + 0.1);
-      }
+      // 玩家偵測
+      let leftHandPos = null;
+      let rightHandPos = null;
 
-      function triggerClap() {
-        const now = Date.now();
-        if (now - lastClapTime > CLAP_COOLDOWN) {
-          statusEl.textContent = 'CLAP! 🎉';
-          statusEl.className = 'clap';
-          playSound();
-          lastClapTime = now;
-          setTimeout(() => {
-            statusEl.textContent = '等待偵測...';
-            statusEl.className = 'wait';
-          }, 500);
+      const Obstacle = class {
+        constructor(side) {
+          this.side = side; // 'left' or 'right'
+          this.x = side === 'left' ? -80 : canvas.width;
+          this.y = Math.random() * (canvas.height - 100);
+          this.width = 80;
+          this.height = 100;
+          this.speed = 4 + gameSpeed;
         }
-      }
+
+        update() {
+          if (this.side === 'left') {
+            this.x += this.speed;
+          } else {
+            this.x -= this.speed;
+          }
+        }
+
+        draw() {
+          ctx.fillStyle = '#ff6b6b';
+          ctx.fillRect(this.x, this.y, this.width, this.height);
+          ctx.strokeStyle = '#ff0000';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(this.x, this.y, this.width, this.height);
+        }
+
+        isOffScreen() {
+          return (this.side === 'left' && this.x > canvas.width) ||
+                 (this.side === 'right' && this.x + this.width < 0);
+        }
+
+        collidesWith(px, py, pw, ph) {
+          return !(px + pw < this.x || px > this.x + this.width ||
+                   py + ph < this.y || py > this.y + this.height);
+        }
+      };
 
       async function initHands() {
-        if (hands) return;
         hands = new Hands({
           locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/${file}`
         });
+
         hands.setOptions({
           maxNumHands: 2,
-          minDetectionConfidence: 0.3,
-          minTrackingConfidence: 0.3,
-          modelComplexity: 0
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+          modelComplexity: 1
         });
       }
 
-      async function initPose() {
-        if (pose) return;
-        pose = new Pose({
-          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@latest/${file}`
-        });
-        pose.setOptions({
-          modelComplexity: 0,
-          minDetectionConfidence: 0.3,
-          minTrackingConfidence: 0.3
-        });
-      }
-
-      function setupAudio(stream) {
-        if (audioContext) return;
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const source = audioContext.createMediaStreamAudioSource(stream);
-        analyser = audioContext.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
-        dataArray = new Uint8Array(analyser.frequencyBinCount);
-      }
-
-      function detectAudioClap() {
-        if (!analyser || !dataArray) return false;
-        analyser.getByteFrequencyData(dataArray);
-        
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const average = sum / dataArray.length;
-        
-        // 如果音量超過閾值，判定為拍手
-        if (average > 80) {
-          debugEl.textContent = `🎤 音量: ${average.toFixed(0)} (偵測到!)`;
-          return true;
-        } else {
-          debugEl.textContent = `🎤 音量: ${average.toFixed(0)}`;
-          return false;
-        }
-      }
-
-      function handCenter(landmarks) {
+      function getHandPosition(landmarks) {
         if (!landmarks || landmarks.length === 0) return null;
+        // 計算手的中心
         let sumX = 0, sumY = 0;
         for (let lm of landmarks) {
           sumX += lm.x;
           sumY += lm.y;
         }
-        return { x: sumX / landmarks.length, y: sumY / landmarks.length };
+        return {
+          x: (sumX / landmarks.length) * canvas.width,
+          y: (sumY / landmarks.length) * canvas.height
+        };
       }
 
-      function distanceBetween(p1, p2) {
-        if (!p1 || !p2) return 999;
-        const dx = p1.x - p2.x;
-        const dy = p1.y - p2.y;
-        return Math.sqrt(dx * dx + dy * dy);
-      }
-
-      function getWristPosition(poseLandmarks) {
-        // 15 = 左手腕, 16 = 右手腕
-        if (poseLandmarks && poseLandmarks.length > 16) {
-          return {
-            left: poseLandmarks[15],
-            right: poseLandmarks[16]
-          };
+      function updatePlayerPosition() {
+        if (leftHandPos) {
+          // 左手在左邊 → 玩家往左移動
+          playerX = Math.max(0, leftHandPos.x - playerWidth / 2);
+        } else if (rightHandPos) {
+          // 右手在右邊 → 玩家往右移動
+          playerX = Math.min(canvas.width - playerWidth, rightHandPos.x - playerWidth / 2);
         }
-        return null;
       }
 
-      async function processHandsFrame() {
-        if (!hands || isProcessing) {
-          requestAnimationFrame(processHandsFrame);
-          return;
-        }
+      function drawPlayer() {
+        ctx.fillStyle = '#5cfb6c';
+        ctx.fillRect(playerX, canvas.height - playerHeight - 20, playerWidth, playerHeight);
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(playerX, canvas.height - playerHeight - 20, playerWidth, playerHeight);
+      }
 
-        isProcessing = true;
+      function checkCollisions() {
+        const playerY = canvas.height - playerHeight - 20;
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+          if (obstacles[i].collidesWith(playerX, playerY, playerWidth, playerHeight)) {
+            endGame();
+            return;
+          }
+        }
+      }
+
+      function endGame() {
+        gameRunning = false;
+        finalScoreDisplay.textContent = score;
+        gameOverDiv.style.display = 'block';
+      }
+
+      async function processFrame() {
+        if (!gameRunning) return;
+
         try {
           const results = await hands.process(videoElement);
           
-          if (results.multiHandLandmarks && results.multiHandLandmarks.length === 2) {
-            const center1 = handCenter(results.multiHandLandmarks[0]);
-            const center2 = handCenter(results.multiHandLandmarks[1]);
-            const dist = distanceBetween(center1, center2);
-            
-            const distPercent = (dist * 100).toFixed(1);
-            debugEl.textContent = `🤲 偵測到 2 隻手 | 距離: ${distPercent}% (閾值: 25%)`;
-            
-            if (dist < DISTANCE_THRESHOLD) {
-              triggerClap();
-            } else {
-              statusEl.textContent = '等待偵測...';
-              statusEl.className = 'wait';
-            }
-          } else {
-            const count = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
-            debugEl.textContent = `🤲 偵測到 ${count} 隻手 (需要 2 隻)`;
-            statusEl.textContent = '等待偵測...';
-            statusEl.className = 'wait';
-          }
-        } catch (err) {
-          console.error('Hands error:', err);
-        }
-        
-        isProcessing = false;
-        requestAnimationFrame(processHandsFrame);
-      }
+          leftHandPos = null;
+          rightHandPos = null;
+          leftHandIndicator.classList.remove('active');
+          rightHandIndicator.classList.remove('active');
 
-      async function processPoseFrame() {
-        if (!pose || isProcessing) {
-          requestAnimationFrame(processPoseFrame);
-          return;
-        }
+          if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            // 判斷是左手還是右手
+            for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+              const handedness = results.multiHandedness[i];
+              const label = handedness.label; // 'Left' or 'Right'
+              const pos = getHandPosition(results.multiHandLandmarks[i]);
 
-        isProcessing = true;
-        try {
-          const results = await pose.process(videoElement);
-          
-          if (results.poseLandmarks && results.poseLandmarks.length > 0) {
-            const wrists = getWristPosition(results.poseLandmarks);
-            
-            if (wrists && wrists.left && wrists.right) {
-              const dist = distanceBetween(wrists.left, wrists.right);
-              const distPercent = (dist * 100).toFixed(1);
-              
-              // 檢查手腕的可見度
-              const leftVis = wrists.left.visibility || 0;
-              const rightVis = wrists.right.visibility || 0;
-              
-              debugEl.textContent = `🧍 姿態偵測 | 手腕距離: ${distPercent}% | 可見度: L:${(leftVis*100).toFixed(0)}% R:${(rightVis*100).toFixed(0)}%`;
-              
-              if (leftVis > 0.5 && rightVis > 0.5 && dist < DISTANCE_THRESHOLD) {
-                triggerClap();
+              if (label === 'Left') {
+                leftHandPos = pos;
+                leftHandIndicator.classList.add('active');
               } else {
-                statusEl.textContent = '等待偵測...';
-                statusEl.className = 'wait';
-              }
-            } else {
-              debugEl.textContent = `🧍 偵測到姿態，但看不到手腕`;
-            }
-          } else {
-            debugEl.textContent = `🧍 沒有偵測到姿態`;
-          }
-        } catch (err) {
-          console.error('Pose error:', err);
-        }
-        
-        isProcessing = false;
-        requestAnimationFrame(processPoseFrame);
-      }
-
-      async function processAudioFrame() {
-        if (detectAudioClap()) {
-          triggerClap();
-        }
-        requestAnimationFrame(processAudioFrame);
-      }
-
-      async function processHybridFrame() {
-        if (isProcessing) {
-          requestAnimationFrame(processHybridFrame);
-          return;
-        }
-
-        isProcessing = true;
-        try {
-          let clapDetected = false;
-          let debugInfo = [];
-
-          // 手部偵測
-          if (hands) {
-            const handsResults = await hands.process(videoElement);
-            if (handsResults.multiHandLandmarks && handsResults.multiHandLandmarks.length === 2) {
-              const center1 = handCenter(handsResults.multiHandLandmarks[0]);
-              const center2 = handCenter(handsResults.multiHandLandmarks[1]);
-              const dist = distanceBetween(center1, center2);
-              if (dist < DISTANCE_THRESHOLD) {
-                clapDetected = true;
-                debugInfo.push(`🤲 手部: 距離 ${(dist*100).toFixed(1)}%`);
+                rightHandPos = pos;
+                rightHandIndicator.classList.add('active');
               }
             }
           }
 
-          // 姿態偵測
-          if (pose) {
-            const poseResults = await pose.process(videoElement);
-            if (poseResults.poseLandmarks && poseResults.poseLandmarks.length > 0) {
-              const wrists = getWristPosition(poseResults.poseLandmarks);
-              if (wrists && wrists.left && wrists.right) {
-                const dist = distanceBetween(wrists.left, wrists.right);
-                if (dist < DISTANCE_THRESHOLD) {
-                  clapDetected = true;
-                  debugInfo.push(`🧍 姿態: 距離 ${(dist*100).toFixed(1)}%`);
-                }
-              }
-            }
-          }
-
-          // 音頻偵測
-          if (analyser) {
-            analyser.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-              sum += dataArray[i];
-            }
-            const average = sum / dataArray.length;
-            if (average > 80) {
-              clapDetected = true;
-              debugInfo.push(`🎤 音量: ${average.toFixed(0)}`);
-            }
-          }
-
-          debugEl.textContent = `🔀 混合模式 | ${debugInfo.join(' | ')}`;
-
-          if (clapDetected) {
-            triggerClap();
-          } else {
-            statusEl.textContent = '等待偵測...';
-            statusEl.className = 'wait';
-          }
+          updatePlayerPosition();
         } catch (err) {
-          console.error('Hybrid error:', err);
+          console.error('Detection error:', err);
         }
-        
-        isProcessing = false;
-        requestAnimationFrame(processHybridFrame);
+
+        requestAnimationFrame(processFrame);
       }
 
-      async function switchMode(mode) {
-        currentMode = mode;
-        document.querySelectorAll('.mode-selector button').forEach(btn => btn.classList.remove('active'));
-        document.getElementById('btn' + mode.charAt(0).toUpperCase() + mode.slice(1)).classList.add('active');
-        
-        lastClapTime = 0;
-        statusEl.textContent = '初始化中...';
-        
-        try {
-          if (mode === 'hands') {
-            await initHands();
-            modeIndicator.textContent = '🤲 Hand Detection - 偵測兩隻手的距離';
-            processHandsFrame();
-          } else if (mode === 'pose') {
-            await initPose();
-            modeIndicator.textContent = '🧍 Pose Detection - 偵測手腕位置';
-            processPoseFrame();
-          } else if (mode === 'audio') {
-            if (!audioContext && mediaStream) {
-              setupAudio(mediaStream);
-            }
-            modeIndicator.textContent = '🎤 Audio Detection - 偵測拍手聲音';
-            processAudioFrame();
-          } else if (mode === 'hybrid') {
-            await initHands();
-            await initPose();
-            if (!audioContext && mediaStream) {
-              setupAudio(mediaStream);
-            }
-            modeIndicator.textContent = '🔀 Hybrid Mode - 混合三種偵測方式';
-            processHybridFrame();
-          }
-          
-          statusEl.textContent = '等待偵測...';
-          statusEl.className = 'wait';
-        } catch (err) {
-          debugEl.textContent = `❌ 初始化失敗: ${err.message}`;
-          console.error('Init error:', err);
+      function gameLoop() {
+        if (!gameRunning) return;
+
+        // 清空 canvas
+        ctx.fillStyle = 'rgba(26, 26, 26, 0.3)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 生成障礙物
+        if (Math.random() < obstacleSpawnRate) {
+          obstacles.push(new Obstacle(Math.random() > 0.5 ? 'left' : 'right'));
         }
+
+        // 更新並繪製障礙物
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+          obstacles[i].update();
+          obstacles[i].draw();
+
+          if (obstacles[i].isOffScreen()) {
+            obstacles.splice(i, 1);
+            score++;
+            scoreDisplay.textContent = score;
+            // 難度增加
+            if (score % 5 === 0) {
+              gameSpeed += 0.5;
+              obstacleSpawnRate += 0.005;
+            }
+          }
+        }
+
+        // 檢查碰撞
+        checkCollisions();
+
+        // 繪製玩家
+        drawPlayer();
+
+        requestAnimationFrame(gameLoop);
       }
 
-      async function startCamera() {
+      async function start() {
         try {
-          debugEl.textContent = '📱 正在啟動相機...';
-          
-          mediaStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-            audio: true
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
           });
-          
-          videoElement.srcObject = mediaStream;
-          videoElement.onloadedmetadata = () => {
+
+          videoElement.srcObject = stream;
+          videoElement.onloadedmetadata = async () => {
             videoElement.play();
-            switchMode('hands');
+            await initHands();
+            processFrame();
+            gameLoop();
           };
         } catch (err) {
-          debugEl.textContent = `❌ 相機錯誤: ${err.message}`;
-          statusEl.textContent = '無法使用相機';
+          alert(`相機錯誤: ${err.message}`);
           console.error('Camera error:', err);
         }
       }
 
-      window.addEventListener('load', () => {
-        statusEl.textContent = '按下「允許」以啟動相機';
-        debugEl.textContent = '初始化中...';
-        startCamera();
+      window.addEventListener('load', start);
+      window.addEventListener('resize', () => {
+        canvas.width = canvas.parentElement.offsetWidth;
+        canvas.height = canvas.parentElement.offsetHeight;
       });
     </script>
   </body>
