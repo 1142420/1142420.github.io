@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Clap Detector (Browser)</title>
     <style>
-      body { font-family: Arial, sans-serif; background: #111; color: #eee; margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-      video, canvas { border: 2px solid #444; border-radius: 8px; max-width: 100%; }
+      body { font-family: Arial, sans-serif; background: #111; color: #eee; margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+      video { border: 2px solid #444; border-radius: 8px; max-width: 100%; width: 640px; height: auto; }
       #status { margin-top: 16px; font-size: 2rem; font-weight: 700; }
-      #debug { margin-top: 8px; font-size: 0.9rem; color: #888; max-width: 600px; }
+      #debug { margin-top: 8px; font-size: 0.9rem; color: #888; max-width: 600px; line-height: 1.5; }
       .clap { color: #5cfb6c; }
       .wait { color: #f55; }
       .hint { margin-top: 8px; color: #bbb; }
@@ -16,122 +16,140 @@
   </head>
   <body>
     <h1>Clap Detector (Browser)</h1>
-    <video id="video" autoplay playsinline width="640" height="480"></video>
+    <video id="video" autoplay playsinline></video>
     <div id="status" class="wait">初始化中...</div>
     <div id="debug"></div>
     <div class="hint">按下「允許」後，對著鏡頭拍手。</div>
 
-    <script async src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm/vision_bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
     <script>
       const videoElement = document.getElementById('video');
       const statusEl = document.getElementById('status');
       const debugEl = document.getElementById('debug');
       
       let hands = null;
-      let camera = null;
-      let frameCount = 0;
+      let cameraRunning = false;
 
-      async function initializeHands() {
-        debugEl.textContent = '正在載入 MediaPipe...';
-        
+      async function setupCamera() {
         try {
-          const vision = await Mediapipe.FilesetResolver.forVisionTasks(
-            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-          );
-          
-          hands = await Mediapipe.HandLandmarker.createFromOptions(vision, {
-            baseOptions: {
-              modelAssetPath: "https://storage.googleapis.com/mediapipe-studio/production/v1/hand_landmarker.task",
-              delegate: "GPU"
-            },
-            runningMode: "VIDEO",
-            numHands: 2,
-            minHandDetectionConfidence: 0.5,
-            minHandPresenceConfidence: 0.5,
-            minTrackingConfidence: 0.5
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
           });
           
-          debugEl.textContent = 'MediaPipe 已載入，等待相機...';
-          startCamera();
-        } catch (err) {
-          debugEl.textContent = `載入失敗: ${err.message}`;
-          console.error('MediaPipe initialization error:', err);
-        }
-      }
-
-      function startCamera() {
-        navigator.mediaDevices.getUserMedia({ 
-          video: { width: 640, height: 480 },
-          audio: false
-        }).then(stream => {
           videoElement.srcObject = stream;
-          videoElement.onloadedmetadata = () => {
-            videoElement.play();
-            debugEl.textContent = '相機已啟動，開始偵測...';
-            detectHands();
-          };
-        }).catch(err => {
-          debugEl.textContent = `相機權限被拒: ${err.message}`;
-          statusEl.textContent = '請允許相機存取';
-          console.error('Camera access error:', err);
-        });
+          
+          return new Promise(resolve => {
+            videoElement.onloadedmetadata = () => {
+              videoElement.play();
+              cameraRunning = true;
+              resolve();
+            };
+          });
+        } catch (err) {
+          debugEl.textContent = `❌ 相機錯誤: ${err.message}`;
+          statusEl.textContent = '無法使用相機';
+          console.error('Camera error:', err);
+          throw err;
+        }
       }
 
       function handCenter(landmarks) {
         if (!landmarks || landmarks.length === 0) return null;
-        const sum = landmarks.reduce((acc, lm) => ({ x: acc.x + lm.x, y: acc.y + lm.y }), { x: 0, y: 0 });
-        return { x: sum.x / landmarks.length, y: sum.y / landmarks.length };
+        let sumX = 0, sumY = 0;
+        for (let lm of landmarks) {
+          sumX += lm.x;
+          sumY += lm.y;
+        }
+        return { 
+          x: sumX / landmarks.length, 
+          y: sumY / landmarks.length 
+        };
       }
 
-      function distanceBetween(pointA, pointB) {
-        if (!pointA || !pointB) return 999;
-        return Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
+      function distanceBetween(p1, p2) {
+        if (!p1 || !p2) return 999;
+        const dx = p1.x - p2.x;
+        const dy = p1.y - p2.y;
+        return Math.sqrt(dx * dx + dy * dy);
       }
 
-      function detectHands() {
-        if (!hands || !videoElement.srcObject) {
-          setTimeout(detectHands, 100);
+      async function processFrame() {
+        if (!cameraRunning || !hands) {
+          requestAnimationFrame(processFrame);
           return;
         }
 
-        const now = performance.now();
-        const results = hands.detectForVideo(videoElement, now);
-
-        if (results && results.landmarks && results.landmarks.length === 2) {
-          const hand1Center = handCenter(results.landmarks[0]);
-          const hand2Center = handCenter(results.landmarks[1]);
-          const dist = distanceBetween(hand1Center, hand2Center);
-
-          if (dist < 0.15) {
-            statusEl.textContent = 'CLAP!';
-            statusEl.className = 'clap';
+        try {
+          const results = await hands.process(videoElement);
+          
+          if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            debugEl.textContent = `✅ 偵測到 ${results.multiHandLandmarks.length} 隻手`;
+            
+            if (results.multiHandLandmarks.length === 2) {
+              const center1 = handCenter(results.multiHandLandmarks[0]);
+              const center2 = handCenter(results.multiHandLandmarks[1]);
+              const dist = distanceBetween(center1, center2);
+              
+              debugEl.textContent = `✅ 偵測到 2 隻手 | 距離: ${dist.toFixed(3)} ${dist < 0.15 ? '⚡' : ''}`;
+              
+              if (dist < 0.15) {
+                statusEl.textContent = 'CLAP!';
+                statusEl.className = 'clap';
+              } else {
+                statusEl.textContent = '等待偵測...';
+                statusEl.className = 'wait';
+              }
+            } else {
+              statusEl.textContent = '等待偵測...';
+              statusEl.className = 'wait';
+            }
           } else {
+            debugEl.textContent = '⏳ 沒有偵測到手...';
             statusEl.textContent = '等待偵測...';
             statusEl.className = 'wait';
           }
-          debugEl.textContent = `偵測到 2 隻手 | 距離: ${dist.toFixed(3)}`;
-        } else {
-          const handCount = (results && results.landmarks) ? results.landmarks.length : 0;
-          statusEl.textContent = '等待偵測...';
-          statusEl.className = 'wait';
-          debugEl.textContent = `偵測到的手: ${handCount}/2`;
+        } catch (err) {
+          console.error('Processing error:', err);
         }
 
-        frameCount++;
-        requestAnimationFrame(detectHands);
+        requestAnimationFrame(processFrame);
       }
 
-      // 等待 Mediapipe 腳本載入完成
-      if (typeof Mediapipe !== 'undefined') {
-        initializeHands();
-      } else {
-        const checkMediapipe = setInterval(() => {
-          if (typeof Mediapipe !== 'undefined') {
-            clearInterval(checkMediapipe);
-            initializeHands();
-          }
-        }, 100);
+      async function initialize() {
+        try {
+          debugEl.textContent = '📱 正在啟動相機...';
+          await setupCamera();
+          
+          debugEl.textContent = '⏳ 正在初始化 MediaPipe Hands...';
+          
+          hands = new Hands({
+            locateFile: (file) => {
+              return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/${file}`;
+            }
+          });
+
+          hands.setOptions({
+            maxNumHands: 2,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5,
+            modelComplexity: 0
+          });
+
+          debugEl.textContent = '✅ MediaPipe 已初始化，開始偵測中...';
+          statusEl.textContent = '等待偵測...';
+          statusEl.className = 'wait';
+          
+          processFrame();
+        } catch (err) {
+          debugEl.textContent = `❌ 初始化失敗: ${err.message}`;
+          console.error('Initialization error:', err);
+        }
       }
+
+      window.addEventListener('load', () => {
+        initialize();
+      });
     </script>
   </body>
 </html>
