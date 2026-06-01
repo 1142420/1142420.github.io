@@ -34,6 +34,11 @@
         minTrackingConfidence: 0.7
       });
 
+      function handCenter(landmarks) {
+        const sum = landmarks.reduce((acc, lm) => ({ x: acc.x + lm.x, y: acc.y + lm.y }), { x: 0, y: 0 });
+        return { x: sum.x / landmarks.length, y: sum.y / landmarks.length };
+      }
+
       function distanceBetween(pointA, pointB) {
         return Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
       }
@@ -50,10 +55,10 @@
 
       hands.onResults((results) => {
         if (results.multiHandLandmarks && results.multiHandLandmarks.length === 2) {
-          const hand1 = results.multiHandLandmarks[0][0];
-          const hand2 = results.multiHandLandmarks[1][0];
+          const hand1 = handCenter(results.multiHandLandmarks[0]);
+          const hand2 = handCenter(results.multiHandLandmarks[1]);
           const dist = distanceBetween(hand1, hand2);
-          updateStatus(dist < 0.12);
+          updateStatus(dist < 0.13);
         } else {
           updateStatus(false);
         }
@@ -74,4 +79,3 @@
     </script>
   </body>
 </html>
-
