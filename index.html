@@ -1,291 +1,430 @@
-<!doctype html>
-<html lang="zh-Hant">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Clap Jump - 拍手跳躍遊戲</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: Arial, sans-serif; background: #111; color: #eee; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
-      .container { max-width: 900px; width: 100%; }
-      h1 { text-align: center; margin-bottom: 16px; }
-      .game-area { position: relative; width: 100%; aspect-ratio: 16/9; background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%); border: 3px solid #444; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
-      video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.4; z-index: 1; background: #000; }
-      canvas { position: absolute; top: 0; left: 0; z-index: 2; }
-      .ui { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 12px 16px; border-radius: 8px; z-index: 100; }
-      .score { font-size: 1.5rem; font-weight: bold; color: #5cfb6c; }
-      .info { margin-top: 8px; font-size: 0.9rem; color: #aaa; }
-      .game-over { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.95); padding: 40px; border-radius: 12px; text-align: center; z-index: 200; display: none; }
-      .game-over h2 { font-size: 2.5rem; color: #ff6b6b; margin-bottom: 16px; }
-      .game-over p { font-size: 1.2rem; margin-bottom: 12px; }
-      .game-over button { padding: 12px 24px; background: #5cfb6c; color: #111; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: bold; }
-      .game-over button:hover { background: #4de559; }
-      .detector { position: absolute; bottom: 10px; left: 10px; right: 10px; display: flex; gap: 20px; justify-content: center; z-index: 50; flex-wrap: wrap; }
-      .detector-item { padding: 6px 12px; background: rgba(0,0,0,0.7); border-radius: 4px; font-size: 0.8rem; border: 1px solid #555; }
-      .detector-item.active { background: #5cfb6c; color: #111; font-weight: bold; border-color: #5cfb6c; }
-      .instructions { background: #222; padding: 16px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9rem; line-height: 1.6; }
-      .instructions h3 { color: #5cfb6c; margin-bottom: 8px; }
-      .instructions ul { margin-left: 20px; }
-      .instructions li { margin: 4px 0; }
+"""
+Clap Jump - 拍手跳躍遊戲 (Python 版)
+=====================================
+需要安裝的套件：
+    pip install pygame opencv-python mediapipe
 
-      /* Start overlay */
-      .start-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); z-index: 300; flex-direction: column; gap: 12px; padding: 12px; }
-      .start-overlay.hidden { display: none; }
-      .start-button { padding: 14px 22px; font-size: 1.1rem; background: #5cfb6c; color: #111; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
-      .start-hint { color: #ddd; font-size: 0.95rem; text-align: center; max-width: 420px; }
-      .small-btn { padding: 8px 12px; font-size: 0.9rem; background: #333; color: #eee; border: 1px solid #555; border-radius: 6px; cursor: pointer; }
-      .status-line { margin-top: 6px; color: #ccc; font-size: 0.9rem; }
-      select, .control-row { margin-top: 8px; }
-      #debugPanel { margin-top: 8px; background:#111; border:1px solid #333; padding:8px; color:#9fd; font-size:0.8rem; max-width:420px; max-height:180px; overflow:auto; }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <h1>🎮 Clap Jump - 拍手跳躍遊戲</h1>
-      
-      <div class="instructions">
-        <h3>📖 遊戲說明：</h3>
-        <ul>
-          <li>👋 <strong>快速拍手（兩隻手靠近）= 跳躍</strong></li>
-          <li>🦖 躲避從右邊來的紅色障礙物</li>
-          <li>🎯 成功躲避得 1 分</li>
-          <li>❌ 被擊中遊戲結束</li>
-          <li>📈 每 5 分難度加倍</li>
-        </ul>
-      </div>
+操作方式：
+    - 雙手靠近（拍手）→ 跳躍
+    - 躲避從右邊來的紅色障礙物
+    - 按 ESC 或關閉視窗結束遊戲
+"""
 
-      <div class="game-area">
-        <video id="video" autoplay playsinline></video>
-        <canvas id="canvas"></canvas>
+import sys
+import math
+import random
+import threading
+import time
 
-        <!-- Start overlay (click to request camera and start) -->
-        <div id="startOverlay" class="start-overlay">
-          <div class="start-hint">點擊下方按鈕以啟動相機並開始遊戲（僅需相機權限）。若手機有前後鏡頭，可從下方選擇。</div>
-          <div class="control-row">
-            <select id="cameraSelect"></select>
-            <button id="refreshCameras" class="small-btn">刷新鏡頭列表</button>
-          </div>
-          <button id="startBtn" class="start-button">開始遊戲</button>
-          <div class="status-line" id="startStatus">等待中…</div>
-          <div style="margin-top:6px"><button id="retryBtn" class="small-btn">重試啟動相機</button></div>
-          <pre id="debugPanel">debug: 未啟動</pre>
-        </div>
+import cv2
+import mediapipe as mp
+import pygame
 
-        <div class="ui">
-          <div class="score">得分: <span id="score">0</span></div>
-          <div class="info">速度: <span id="speed">1.0</span>x</div>
-        </div>
-        <div class="detector">
-          <div class="detector-item" id="handDetector">👋 手部偵測: --</div>
-        </div>
-        <div class="game-over" id="gameOver">
-          <h2>遊戲結束！</h2>
-          <p>最終得分: <span id="finalScore">0</span></p>
-          <button onclick="location.reload()">重新開始</button>
-        </div>
-      </div>
-    </div>
+# ──────────────────────────────────────────────
+#  設定常數
+# ──────────────────────────────────────────────
+WINDOW_W, WINDOW_H = 960, 540
+FPS = 60
 
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/hands.js"></script>
-    <script>
-      const videoElement = document.getElementById('video');
-      const canvas = document.getElementById('canvas');
-      const ctx = canvas.getContext('2d');
-      const scoreDisplay = document.getElementById('score');
-      const speedDisplay = document.getElementById('speed');
-      const gameOverDiv = document.getElementById('gameOver');
-      const finalScoreDisplay = document.getElementById('finalScore');
-      const handDetectorIndicator = document.getElementById('handDetector');
-      const startOverlay = document.getElementById('startOverlay');
-      const startBtn = document.getElementById('startBtn');
-      const retryBtn = document.getElementById('retryBtn');
-      const startStatus = document.getElementById('startStatus');
-      const cameraSelect = document.getElementById('cameraSelect');
-      const refreshCameras = document.getElementById('refreshCameras');
-      const debugPanel = document.getElementById('debugPanel');
+GRAVITY       = 0.55
+GROUND_Y      = WINDOW_H - 120   # 地面 Y 座標（角色底部）
+DINO_W        = 50
+DINO_H        = 50
+OBSTACLE_W    = 40
+OBSTACLE_H    = 60
+JUMP_VELOCITY = -16
+JUMP_COOLDOWN = 0.25             # 秒
 
-      // 設置 canvas
-      function resizeCanvas() {
-        canvas.width = canvas.parentElement.offsetWidth;
-        canvas.height = canvas.parentElement.offsetHeight;
-      }
-      resizeCanvas();
+# 顏色
+C_BG_TOP      = (26,  26,  46)
+C_BG_BOT      = (22,  33,  62)
+C_GREEN       = (92,  251, 108)
+C_RED         = (255, 80,  80)
+C_GROUND      = (68,  68,  68)
+C_WHITE       = (230, 230, 230)
+C_YELLOW      = (255, 220, 50)
+C_DARK        = (20,  20,  20)
+C_PANEL       = (0,   0,   0,  180)   # RGBA
 
-      // 遊戲常量
-      const GRAVITY = 0.6;
-      const GROUND_Y = canvas.height - 120;
-      const DINO_WIDTH = 50;
-      const DINO_HEIGHT = 50;
-      const OBSTACLE_WIDTH = 40;
-      const OBSTACLE_HEIGHT = 60;
+# ──────────────────────────────────────────────
+#  MediaPipe 手部偵測執行緒
+# ──────────────────────────────────────────────
+class HandDetector:
+    def __init__(self):
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(
+            max_num_hands=2,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+            model_complexity=0
+        )
+        self.cap = cv2.VideoCapture(0)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-      // 遊戲變量
-      let hands = null;
-      let gameRunning = false;
-      let score = 0;
-      let gameSpeed = 1;
-      let obstacles = [];
-      let obstacleSpawnCounter = 0;
-      let obstacleSpawnRate = 150;
+        self._lock        = threading.Lock()
+        self._clap        = False          # 本幀是否偵測到拍手
+        self._hand_dist   = 0.0
+        self._hand_vel    = 0.0
+        self._num_hands   = 0
+        self._last_dist   = 0.0
+        self._last_time   = time.time()
+        self._cam_frame   = None           # 最新相機畫面（BGR）
+        self._running     = True
 
-      // 玩家（恐龍）
-      let dinoX = 50;
-      let dinoY = GROUND_Y;
-      let dinoVelocityY = 0;
-      let isJumping = false;
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
 
-      // 偵測變量
-      let lastHandDistance = 0;
-      let lastHandDistanceTime = 0;
-      let handDistanceVelocity = 0;
-      let lastJumpTime = 0;
-      const JUMP_COOLDOWN = 200; // ms，避免連續跳躍
+    # ── 內部偵測迴圈（背景執行緒） ──
+    def _loop(self):
+        while self._running:
+            ok, frame = self.cap.read()
+            if not ok:
+                time.sleep(0.01)
+                continue
 
-      // 追蹤 media stream
-      let mediaStream = null;
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.hands.process(frame_rgb)
 
-      function logDebug(obj) {
-        try { debugPanel.textContent = JSON.stringify(obj, null, 2); } catch (e) { debugPanel.textContent = String(obj); }
-      }
+            clap     = False
+            dist     = 0.0
+            velocity = 0.0
+            n_hands  = 0
 
-      async function listCameras() {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
-          cameraSelect.innerHTML = '<option>不支援 enumerateDevices</option>';
-          return;
-        }
+            if results.multi_hand_landmarks:
+                n_hands = len(results.multi_hand_landmarks)
+                if n_hands >= 2:
+                    def center(lms):
+                        xs = [lm.x for lm in lms.landmark]
+                        ys = [lm.y for lm in lms.landmark]
+                        return (sum(xs)/len(xs), sum(ys)/len(ys))
 
-        try {
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          const cams = devices.filter(d => d.kind === 'videoinput');
-          cameraSelect.innerHTML = '';
-          cams.forEach((c, idx) => {
-            const opt = document.createElement('option');
-            opt.value = c.deviceId;
-            opt.textContent = c.label || `Camera ${idx+1}`;
-            cameraSelect.appendChild(opt);
-          });
-          if (cams.length === 0) {
-            cameraSelect.innerHTML = '<option>未找到相機</option>';
-          }
-          logDebug({ camerasFound: cams.length, devices: cams.map(d => ({label:d.label, id:d.deviceId})) });
-        } catch (err) {
-          console.error('enumerateDevices failed', err);
-          cameraSelect.innerHTML = '<option>列表取得失敗</option>';
-          logDebug({ error: err.message || err.name });
-        }
-      }
+                    c1 = center(results.multi_hand_landmarks[0])
+                    c2 = center(results.multi_hand_landmarks[1])
+                    # 使用正規化座標（0~1），乘以畫面尺寸
+                    dx = (c1[0] - c2[0]) * 640
+                    dy = (c1[1] - c2[1]) * 480
+                    dist = math.sqrt(dx*dx + dy*dy)
 
-      async function initHands() {
-        hands = new Hands({
-          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/${file}`
-        });
+                    now = time.time()
+                    dt  = max(now - self._last_time, 0.001)
+                    velocity = (self._last_dist - dist) / dt   # px/s；正值 = 靠近
+                    self._last_dist = dist
+                    self._last_time = now
 
-        hands.setOptions({
-          maxNumHands: 2,
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-          modelComplexity: 0
-        });
-      }
+                    clap = velocity > 200   # 閾值：靠近速度 > 200 px/s
 
-      function handCenter(landmarks) {
-        if (!landmarks || landmarks.length === 0) return null;
-        let sumX = 0, sumY = 0;
-        for (let lm of landmarks) { sumX += lm.x; sumY += lm.y; }
-        return { x: (sumX / landmarks.length) * canvas.width, y: (sumY / landmarks.length) * canvas.height };
-      }
+            with self._lock:
+                self._clap      = clap
+                self._hand_dist = dist
+                self._hand_vel  = velocity
+                self._num_hands = n_hands
+                self._cam_frame = cv2.flip(frame, 1)   # 水平翻轉（鏡像）
 
-      function distanceBetween(p1, p2) {
-        if (!p1 || !p2) return 999;
-        const dx = p1.x - p2.x; const dy = p1.y - p2.y; return Math.sqrt(dx*dx + dy*dy);
-      }
+    # ── 供主迴圈讀取 ──
+    def get_state(self):
+        """回傳 (clap_triggered, hand_dist, hand_vel, num_hands)"""
+        with self._lock:
+            state = (self._clap, self._hand_dist, self._hand_vel, self._num_hands)
+            self._clap = False   # 消耗一次拍手事件
+        return state
 
-      function detectClapFromHands(results) {
-        if (!results.multiHandLandmarks || results.multiHandLandmarks.length < 2) {
-          handDetectorIndicator.textContent = '👋 手部偵測: 需要 2 隻手';
-          handDetectorIndicator.classList.remove('active');
-          return false;
-        }
-        const center1 = handCenter(results.multiHandLandmarks[0]);
-        const center2 = handCenter(results.multiHandLandmarks[1]);
-        const dist = distanceBetween(center1, center2);
-        const now = Date.now();
-        const timeDelta = Math.max(now - lastHandDistanceTime, 1);
-        handDistanceVelocity = (lastHandDistance - dist) / timeDelta * 1000; // px/s
-        handDetectorIndicator.textContent = `👋 距離: ${(dist).toFixed(0)}px | 速度: ${handDistanceVelocity.toFixed(2)}px/s`;
-        lastHandDistance = dist; lastHandDistanceTime = now;
-        if (handDistanceVelocity > 200) { handDetectorIndicator.classList.add('active'); return true; }
-        else { handDetectorIndicator.classList.remove('active'); return false; }
-      }
+    def get_frame(self):
+        with self._lock:
+            return self._cam_frame
 
-      function jump() { const now = Date.now(); if (now - lastJumpTime > JUMP_COOLDOWN && !isJumping) { dinoVelocityY = -15; isJumping = true; lastJumpTime = now; } }
-      function updateDino() { dinoVelocityY += GRAVITY; dinoY += dinoVelocityY; if (dinoY >= GROUND_Y) { dinoY = GROUND_Y; dinoVelocityY = 0; isJumping = false; } }
-      function drawDino() { ctx.fillStyle = '#5cfb6c'; ctx.fillRect(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT); ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 3; ctx.strokeRect(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT); ctx.fillStyle = '#000'; ctx.fillRect(dinoX + 15, dinoY + 15, 8, 8); }
-      function checkCollisions() { for (let i = obstacles.length - 1; i >= 0; i--) { if (obstacles[i].collidesWith(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT)) { endGame(); return; } } }
-      function endGame() { gameRunning = false; finalScoreDisplay.textContent = score; gameOverDiv.style.display = 'block'; }
+    def stop(self):
+        self._running = False
+        self.cap.release()
 
-      async function processFrame() { if (!gameRunning) return; try { const results = await hands.process(videoElement); const clapFromHands = detectClapFromHands(results); if (clapFromHands) jump(); } catch (err) { console.error('Detection error:', err); } requestAnimationFrame(processFrame); }
-      function gameLoop() { if (!gameRunning) return; ctx.fillStyle = 'rgba(26, 26, 46, 0.5)'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.strokeStyle = '#444'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, GROUND_Y); ctx.lineTo(canvas.width, GROUND_Y); ctx.stroke(); obstacleSpawnCounter++; if (obstacleSpawnCounter > obstacleSpawnRate) { obstacles.push(new Obstacle()); obstacleSpawnCounter = 0; obstacleSpawnRate = Math.max(80, 150 - score*3); } for (let i = obstacles.length - 1; i >= 0; i--) { obstacles[i].update(); obstacles[i].draw(); if (obstacles[i].isOffScreen()) { obstacles.splice(i,1); score++; scoreDisplay.textContent = score; if (score%5 === 0) { gameSpeed += 0.5; speedDisplay.textContent = gameSpeed.toFixed(1); } } } updateDino(); drawDino(); checkCollisions(); requestAnimationFrame(gameLoop); }
 
-      async function initCamera(deviceId = null) {
-        try {
-          startStatus.textContent = '正在啟動相機...';
-          const constraints = deviceId ? { video: { deviceId: { exact: deviceId } } } : { video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } };
-          // stop old tracks
-          if (mediaStream) {
-            mediaStream.getTracks().forEach(t => t.stop());
-            mediaStream = null;
-          }
-          const stream = await navigator.mediaDevices.getUserMedia(constraints);
-          mediaStream = stream;
-          videoElement.srcObject = stream;
-          await videoElement.play();
-          startStatus.textContent = '相機已啟動';
-          // populate camera list again (labels available after permission)
-          await listCameras();
-          logDebug({streamActive:true, tracks: stream.getTracks().map(t => ({kind:t.kind, label:t.label}))});
-          return true;
-        } catch (err) {
-          console.error('Camera init failed:', err);
-          startStatus.textContent = '無法啟動相機: ' + (err.message || err.name);
-          logDebug({error: err.name || err.message});
-          return false;
-        }
-      }
+# ──────────────────────────────────────────────
+#  障礙物
+# ──────────────────────────────────────────────
+class Obstacle:
+    def __init__(self, speed):
+        # 隨機高度變化讓遊戲更多樣
+        self.h = random.randint(40, 80)
+        self.w = OBSTACLE_W
+        self.x = float(WINDOW_W + 20)
+        self.y = float(GROUND_Y - self.h + DINO_H)
+        self.speed = speed
 
-      async function startGameAfterCamera() {
-        startOverlay.classList.add('hidden');
-        gameRunning = true;
-        await initHands();
-        processFrame();
-        gameLoop();
-      }
+    def update(self):
+        self.x -= self.speed
 
-      async function startButtonHandler() {
-        startStatus.textContent = '請允許相機權限...';
-        const selected = cameraSelect.value || null;
-        const ok = await initCamera(selected);
-        if (ok) await startGameAfterCamera();
-      }
+    def draw(self, screen):
+        rect = pygame.Rect(int(self.x), int(self.y), self.w, self.h)
+        pygame.draw.rect(screen, C_RED, rect, border_radius=4)
+        pygame.draw.rect(screen, (200, 40, 40), rect, width=2, border_radius=4)
 
-      retryBtn.addEventListener('click', async () => {
-        startStatus.textContent = '重試中...';
-        const selected = cameraSelect.value || null;
-        const ok = await initCamera(selected);
-        if (ok) await startGameAfterCamera();
-      });
+    def is_off_screen(self):
+        return self.x + self.w < 0
 
-      startBtn.addEventListener('click', startButtonHandler);
-      refreshCameras.addEventListener('click', async () => { startStatus.textContent = '刷新相機列表...'; await listCameras(); startStatus.textContent = '列表已更新'; });
+    def collides(self, dx, dy, dw, dh):
+        """AABB 碰撞（略微縮小碰撞框增加容錯）"""
+        margin = 8
+        return not (
+            dx + dw - margin < self.x + margin or
+            dx + margin > self.x + self.w - margin or
+            dy + dh - margin < self.y + margin or
+            dy + margin > self.y + self.h - margin
+        )
 
-      // On load: show overlay and list cameras (labels may be empty until permission granted)
-      window.addEventListener('load', async () => {
-        startOverlay.classList.remove('hidden');
-        startStatus.textContent = '請點「開始遊戲」以啟動相機';
-        await listCameras();
-      });
 
-      window.addEventListener('resize', resizeCanvas);
-    </script>
-  </body>
-</html>
+# ──────────────────────────────────────────────
+#  主遊戲
+# ──────────────────────────────────────────────
+class Game:
+    def __init__(self):
+        pygame.init()
+        pygame.display.set_caption("Clap Jump - 拍手跳躍遊戲")
+        self.screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
+        self.clock  = pygame.time.Clock()
+
+        # 字型
+        pygame.font.init()
+        self.font_big   = pygame.font.SysFont("Arial", 48, bold=True)
+        self.font_med   = pygame.font.SysFont("Arial", 28, bold=True)
+        self.font_small = pygame.font.SysFont("Arial", 20)
+
+        # 背景漸層
+        self._bg = self._make_gradient()
+
+        self.detector = HandDetector()
+        self._reset()
+
+    def _make_gradient(self):
+        surf = pygame.Surface((WINDOW_W, WINDOW_H))
+        for y in range(WINDOW_H):
+            t = y / WINDOW_H
+            r = int(C_BG_TOP[0] + (C_BG_BOT[0]-C_BG_TOP[0])*t)
+            g = int(C_BG_TOP[1] + (C_BG_BOT[1]-C_BG_TOP[1])*t)
+            b = int(C_BG_TOP[2] + (C_BG_BOT[2]-C_BG_TOP[2])*t)
+            pygame.draw.line(surf, (r,g,b), (0,y), (WINDOW_W,y))
+        return surf
+
+    def _reset(self):
+        self.score          = 0
+        self.game_speed     = 5.0          # 基礎障礙物移動速度（px/frame）
+        self.running        = True
+        self.game_over      = False
+        self.obstacles      = []
+        self.spawn_counter  = 0
+        self.spawn_rate     = 150          # frames
+        self.dino_x         = 80.0
+        self.dino_y         = float(GROUND_Y)
+        self.dino_vy        = 0.0
+        self.is_jumping     = False
+        self.last_jump_time = 0.0
+        self.particle_list  = []           # 跳躍粒子特效
+
+    # ── 跳躍 ──
+    def _jump(self):
+        now = time.time()
+        if not self.is_jumping and now - self.last_jump_time > JUMP_COOLDOWN:
+            self.dino_vy = JUMP_VELOCITY
+            self.is_jumping = True
+            self.last_jump_time = now
+            # 粒子特效
+            for _ in range(8):
+                self.particle_list.append({
+                    'x': self.dino_x + DINO_W/2,
+                    'y': self.dino_y + DINO_H,
+                    'vx': random.uniform(-3, 3),
+                    'vy': random.uniform(1, 4),
+                    'life': 20
+                })
+
+    # ── 更新物理 ──
+    def _update_dino(self):
+        self.dino_vy += GRAVITY
+        self.dino_y  += self.dino_vy
+        if self.dino_y >= GROUND_Y:
+            self.dino_y  = GROUND_Y
+            self.dino_vy = 0.0
+            self.is_jumping = False
+
+    def _update_particles(self):
+        for p in self.particle_list:
+            p['x'] += p['vx']
+            p['y'] += p['vy']
+            p['vy'] += 0.3
+            p['life'] -= 1
+        self.particle_list = [p for p in self.particle_list if p['life'] > 0]
+
+    # ── 繪製 ──
+    def _draw_dino(self):
+        x, y = int(self.dino_x), int(self.dino_y)
+        # 身體
+        pygame.draw.rect(self.screen, C_GREEN, (x, y, DINO_W, DINO_H), border_radius=6)
+        pygame.draw.rect(self.screen, (0, 200, 0), (x, y, DINO_W, DINO_H), width=3, border_radius=6)
+        # 眼睛
+        pygame.draw.circle(self.screen, C_DARK, (x+15, y+15), 5)
+        pygame.draw.circle(self.screen, C_DARK, (x+32, y+15), 5)
+        pygame.draw.circle(self.screen, C_WHITE, (x+16, y+13), 2)
+        pygame.draw.circle(self.screen, C_WHITE, (x+33, y+13), 2)
+        # 粒子
+        for p in self.particle_list:
+            alpha = int(255 * p['life'] / 20)
+            color = (92, 251, 108, alpha)
+            surf = pygame.Surface((6,6), pygame.SRCALPHA)
+            pygame.draw.circle(surf, color, (3,3), 3)
+            self.screen.blit(surf, (int(p['x'])-3, int(p['y'])-3))
+
+    def _draw_hud(self, clap, dist, vel, n_hands):
+        # 左上角資訊面板
+        panel = pygame.Surface((220, 90), pygame.SRCALPHA)
+        panel.fill((0,0,0,160))
+        self.screen.blit(panel, (10, 10))
+
+        score_txt = self.font_med.render(f"得分: {self.score}", True, C_GREEN)
+        speed_txt = self.font_small.render(f"速度: {self.game_speed/5:.1f}x", True, C_WHITE)
+        self.screen.blit(score_txt, (20, 16))
+        self.screen.blit(speed_txt, (20, 50))
+
+        # 底部偵測狀態列
+        if n_hands >= 2:
+            color = C_GREEN if clap else C_WHITE
+            status = f"👋 距離: {dist:.0f}px | 速度: {vel:.0f}px/s"
+        else:
+            color = (180, 180, 180)
+            status = f"👋 手部偵測: 需要 2 隻手（目前偵測到 {n_hands} 隻）"
+
+        det_panel = pygame.Surface((WINDOW_W - 20, 30), pygame.SRCALPHA)
+        det_panel.fill((0,0,0,140))
+        self.screen.blit(det_panel, (10, WINDOW_H - 40))
+        det_txt = self.font_small.render(status, True, color)
+        self.screen.blit(det_txt, (20, WINDOW_H - 34))
+
+    def _draw_game_over(self):
+        # 半透明遮罩
+        overlay = pygame.Surface((WINDOW_W, WINDOW_H), pygame.SRCALPHA)
+        overlay.fill((0,0,0,160))
+        self.screen.blit(overlay, (0,0))
+
+        panel_w, panel_h = 400, 220
+        px, py = (WINDOW_W-panel_w)//2, (WINDOW_H-panel_h)//2
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        panel.fill((20,20,20,230))
+        self.screen.blit(panel, (px, py))
+        pygame.draw.rect(self.screen, C_RED, (px,py,panel_w,panel_h), width=3, border_radius=10)
+
+        over_txt  = self.font_big.render("遊戲結束！", True, C_RED)
+        score_txt = self.font_med.render(f"最終得分：{self.score}", True, C_WHITE)
+        hint_txt  = self.font_small.render("按 R 重新開始  |  按 ESC 離開", True, (180,180,180))
+
+        self.screen.blit(over_txt,  (px + (panel_w - over_txt.get_width())//2,  py+30))
+        self.screen.blit(score_txt, (px + (panel_w - score_txt.get_width())//2, py+100))
+        self.screen.blit(hint_txt,  (px + (panel_w - hint_txt.get_width())//2,  py+160))
+
+    def _draw_cam_preview(self, frame):
+        """右上角顯示相機畫面（小視窗）"""
+        if frame is None:
+            return
+        h, w = 90, 160
+        frame_small = cv2.resize(frame, (w, h))
+        frame_rgb   = cv2.cvtColor(frame_small, cv2.COLOR_BGR2RGB)
+        surf = pygame.surfarray.make_surface(frame_rgb.swapaxes(0,1))
+        self.screen.blit(surf, (WINDOW_W - w - 10, 10))
+        pygame.draw.rect(self.screen, C_WHITE, (WINDOW_W-w-10, 10, w, h), width=2)
+
+    def _draw_start_hint(self):
+        txt = self.font_small.render("準備好後請拍手開始！讓 MediaPipe 偵測到雙手…", True, C_YELLOW)
+        self.screen.blit(txt, ((WINDOW_W - txt.get_width())//2, WINDOW_H//2 - 20))
+
+    # ── 主迴圈 ──
+    def run(self):
+        while self.running:
+            # ── 事件 ──
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        self.running = False
+                    elif event.key == pygame.K_r and self.game_over:
+                        self._reset()
+                    elif event.key == pygame.K_SPACE and not self.game_over:
+                        # 空白鍵也可以跳（測試用）
+                        self._jump()
+
+            # ── 手部偵測 ──
+            clap, dist, vel, n_hands = self.detector.get_state()
+            cam_frame = self.detector.get_frame()
+
+            # ── 遊戲邏輯 ──
+            if not self.game_over:
+                if clap:
+                    self._jump()
+
+                self._update_dino()
+                self._update_particles()
+
+                # 生成障礙物
+                self.spawn_counter += 1
+                if self.spawn_counter >= self.spawn_rate:
+                    self.obstacles.append(Obstacle(self.game_speed))
+                    self.spawn_counter = 0
+                    self.spawn_rate = max(60, 150 - self.score * 2)
+
+                # 更新 / 移除障礙物
+                for obs in self.obstacles[:]:
+                    obs.update()
+                    if obs.is_off_screen():
+                        self.obstacles.remove(obs)
+                        self.score += 1
+                        # 每 5 分加速
+                        if self.score % 5 == 0:
+                            self.game_speed += 0.5
+
+                # 碰撞偵測
+                for obs in self.obstacles:
+                    if obs.collides(self.dino_x, self.dino_y, DINO_W, DINO_H):
+                        self.game_over = True
+                        break
+
+            # ──────────────────── 繪製 ────────────────────
+            self.screen.blit(self._bg, (0,0))
+
+            # 地面線
+            pygame.draw.line(self.screen, C_GROUND,
+                             (0, GROUND_Y + DINO_H),
+                             (WINDOW_W, GROUND_Y + DINO_H), 2)
+            # 地面底紋
+            for gx in range(0, WINDOW_W, 40):
+                pygame.draw.line(self.screen, (50,50,60),
+                                 (gx, GROUND_Y + DINO_H),
+                                 (gx, WINDOW_H), 1)
+
+            # 障礙物
+            for obs in self.obstacles:
+                obs.draw(self.screen)
+
+            # 角色
+            self._draw_dino()
+
+            # HUD
+            self._draw_hud(clap, dist, vel, n_hands)
+
+            # 相機小視窗
+            self._draw_cam_preview(cam_frame)
+
+            if self.game_over:
+                self._draw_game_over()
+            elif n_hands < 2:
+                self._draw_start_hint()
+
+            pygame.display.flip()
+            self.clock.tick(FPS)
+
+        # 清理
+        self.detector.stop()
+        pygame.quit()
+        sys.exit()
+
+
+# ──────────────────────────────────────────────
+if __name__ == "__main__":
+    game = Game()
+    game.run()
