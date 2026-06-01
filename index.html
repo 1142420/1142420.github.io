@@ -393,22 +393,15 @@
 
       startBtn.addEventListener('click', startButtonHandler);
 
-      // On load, try auto-start quietly. If it fails (e.g., permission blocked), show the overlay so user can click.
-      window.addEventListener('load', async () => {
-        startStatus.textContent = '嘗試自動啟動相機...';
-        // try auto init without showing overlay change
-        const ok = await initCamera();
-        if (ok) {
-          // hide overlay and start
-          startOverlay.classList.add('hidden');
-          await initHands();
-          gameRunning = true;
-          processFrame();
-          gameLoop();
-        } else {
-          // Show overlay so user can manually start
-          startOverlay.classList.remove('hidden');
-        }
+      // --- IMPORTANT: Removed auto-start on load. Now the game will only start when the player clicks "開始遊戲".
+      // Previously the page attempted to call getUserMedia() automatically on load which caused
+      // permission prompts or failures on some browsers. To make behavior consistent and user-controlled
+      // we now wait for the user to click the start button.
+
+      // Show overlay initially (user must press start)
+      window.addEventListener('load', () => {
+        startOverlay.classList.remove('hidden');
+        startStatus.textContent = '請點「開始遊戲」以啟動相機';
       });
 
       window.addEventListener('resize', () => {
