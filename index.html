@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Clap Dodge - 拍手跳躍遊戲</title>
+    <title>Clap Jump - 拍手跳躍遊戲</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
       body { font-family: Arial, sans-serif; background: #111; color: #eee; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
@@ -36,7 +36,7 @@
       <div class="instructions">
         <h3>📖 遊戲說明：</h3>
         <ul>
-          <li>👋 <strong>拍手就會跳躍</strong>（用力拍 = 跳得更高）</li>
+          <li>👋 <strong>快速拍手（兩隻手靠近）= 跳躍</strong></li>
           <li>🦖 躲避從右邊來的紅色障礙物</li>
           <li>🎯 成功躲避得 1 分</li>
           <li>❌ 被擊中遊戲結束</li>
@@ -53,7 +53,6 @@
         </div>
         <div class="detector">
           <div class="detector-item" id="handDetector">👋 手部偵測: --</div>
-          <div class="detector-item" id="audioDetector">🎤 聲音: --</div>
         </div>
         <div class="game-over" id="gameOver">
           <h2>遊戲結束！</h2>
@@ -73,7 +72,6 @@
       const gameOverDiv = document.getElementById('gameOver');
       const finalScoreDisplay = document.getElementById('finalScore');
       const handDetectorIndicator = document.getElementById('handDetector');
-      const audioDetectorIndicator = document.getElementById('audioDetector');
 
       // 設置 canvas
       canvas.width = canvas.parentElement.offsetWidth;
@@ -106,13 +104,8 @@
       let lastHandDistance = 0;
       let lastHandDistanceTime = 0;
       let handDistanceVelocity = 0;
-      let lastAudioTime = 0;
-
-      // 音頻偵測
-      let audioContext = null;
-      let analyser = null;
-      let dataArray = null;
-      let mediaStream = null;
+      let lastJumpTime = 0;
+      const JUMP_COOLDOWN = 200; // ms，避免連續跳躍
 
       const Obstacle = class {
         constructor() {
@@ -157,16 +150,6 @@
         });
       }
 
-      function setupAudio(stream) {
-        if (audioContext) return;
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const source = audioContext.createMediaStreamAudioSource(stream);
-        analyser = audioContext.createAnalyser();
-        analyser.fftSize = 256;
-        source.connect(analyser);
-        dataArray = new Uint8Array(analyser.frequencyBinCount);
-      }
-
       function handCenter(landmarks) {
         if (!landmarks || landmarks.length === 0) return null;
         let sumX = 0, sumY = 0;
@@ -203,14 +186,14 @@
         const timeDelta = Math.max(now - lastHandDistanceTime, 1);
         handDistanceVelocity = (lastHandDistance - dist) / timeDelta * 1000; // 每秒像素變化
 
-        handDetectorIndicator.textContent = `👋 手部距離: ${(dist * 100).toFixed(0)}px (速度: ${handDistanceVelocity.toFixed(2)})`;
+        handDetectorIndicator.textContent = `👋 距離: ${(dist).toFixed(0)}px | 速度: ${handDistanceVelocity.toFixed(2)}px/s`;
 
         lastHandDistance = dist;
         lastHandDistanceTime = now;
 
         // 如果手快速靠近（距離快速減小），認為是拍手
-        // 閾值：每秒靠近超過 300px
-        if (handDistanceVelocity > 300) {
+        // 閾值：每秒靠近超過 200px
+        if (handDistanceVelocity > 200) {
           handDetectorIndicator.classList.add('active');
           return true;
         } else {
@@ -219,34 +202,12 @@
         }
       }
 
-      function detectClapFromAudio() {
-        if (!analyser || !dataArray) return false;
-
-        analyser.getByteFrequencyData(dataArray);
-        
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const average = sum / dataArray.length;
-
-        audioDetectorIndicator.textContent = `🎤 聲音: ${average.toFixed(0)}`;
-
-        // 如果音量超過閾值且距離上一次拍手超過 200ms
-        if (average > 80 && Date.now() - lastAudioTime > 200) {
-          audioDetectorIndicator.classList.add('active');
-          lastAudioTime = Date.now();
-          return true;
-        } else {
-          audioDetectorIndicator.classList.remove('active');
-          return false;
-        }
-      }
-
       function jump() {
-        if (!isJumping) {
+        const now = Date.now();
+        if (now - lastJumpTime > JUMP_COOLDOWN && !isJumping) {
           dinoVelocityY = -15; // 跳躍速度
           isJumping = true;
+          lastJumpTime = now;
         }
       }
 
@@ -298,11 +259,8 @@
           // 偵測拍手（手部快速靠近）
           const clapFromHands = detectClapFromHands(results);
 
-          // 偵測拍手（聲音）
-          const clapFromAudio = detectClapFromAudio();
-
-          // 任一方法偵測到拍手就跳躍
-          if (clapFromHands || clapFromAudio) {
+          // 觸發跳躍
+          if (clapFromHands) {
             jump();
           }
         } catch (err) {
@@ -367,22 +325,19 @@
       async function start() {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: true
+            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
           });
 
-          mediaStream = stream;
           videoElement.srcObject = stream;
           
           videoElement.onloadedmetadata = async () => {
             videoElement.play();
-            setupAudio(stream);
             await initHands();
             processFrame();
             gameLoop();
           };
         } catch (err) {
-          alert(`相機/麥克風錯誤: ${err.message}`);
+          alert(`相機錯誤: ${err.message}`);
           console.error('Init error:', err);
         }
       }
