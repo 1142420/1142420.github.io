@@ -2,73 +2,69 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
     <title>Clap Jump - 拍手跳躍遊戲</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: Arial, sans-serif; background: #111; color: #eee; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+      /* 加上 user-select: none 防止手機端誤觸反白文字 */
+      body { font-family: Arial, sans-serif; background: #111; color: #eee; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 10px; user-select: none; }
       .container { max-width: 900px; width: 100%; }
-      h1 { text-align: center; margin-bottom: 16px; }
-      .game-area { position: relative; width: 100%; aspect-ratio: 16/9; background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%); border: 3px solid #444; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
-      video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.4; z-index: 1; background: #000; }
+      h1 { text-align: center; margin-bottom: 16px; font-size: 1.5rem; }
+      .game-area { position: relative; width: 100%; aspect-ratio: 16/9; background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%); border: 3px solid #444; border-radius: 8px; overflow: hidden; margin-bottom: 16px; touch-action: none; }
+      /* 確保 video 鋪滿且不影響佈局 */
+      video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.4; z-index: 1; background: #000; transform: scaleX(-1); }
       canvas { position: absolute; top: 0; left: 0; z-index: 2; }
-      .ui { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 12px 16px; border-radius: 8px; z-index: 100; }
-      .score { font-size: 1.5rem; font-weight: bold; color: #5cfb6c; }
-      .info { margin-top: 8px; font-size: 0.9rem; color: #aaa; }
-      .game-over { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.95); padding: 40px; border-radius: 12px; text-align: center; z-index: 200; display: none; }
-      .game-over h2 { font-size: 2.5rem; color: #ff6b6b; margin-bottom: 16px; }
-      .game-over p { font-size: 1.2rem; margin-bottom: 12px; }
-      .game-over button { padding: 12px 24px; background: #5cfb6c; color: #111; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: bold; }
-      .game-over button:hover { background: #4de559; }
-      .detector { position: absolute; bottom: 10px; left: 10px; right: 10px; display: flex; gap: 20px; justify-content: center; z-index: 50; flex-wrap: wrap; }
-      .detector-item { padding: 6px 12px; background: rgba(0,0,0,0.7); border-radius: 4px; font-size: 0.8rem; border: 1px solid #555; }
+      .ui { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 8px; z-index: 100; }
+      .score { font-size: 1.2rem; font-weight: bold; color: #5cfb6c; }
+      .info { margin-top: 4px; font-size: 0.8rem; color: #aaa; }
+      .game-over { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.95); padding: 30px; border-radius: 12px; text-align: center; z-index: 200; display: none; width: 80%; max-width: 300px; }
+      .game-over h2 { font-size: 2rem; color: #ff6b6b; margin-bottom: 16px; }
+      .game-over p { font-size: 1.1rem; margin-bottom: 12px; }
+      .game-over button { padding: 10px 20px; background: #5cfb6c; color: #111; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; font-weight: bold; width: 100%; }
+      .detector { position: absolute; bottom: 10px; left: 10px; right: 10px; display: flex; gap: 10px; justify-content: center; z-index: 50; flex-wrap: wrap; }
+      .detector-item { padding: 6px 10px; background: rgba(0,0,0,0.7); border-radius: 4px; font-size: 0.8rem; border: 1px solid #555; }
       .detector-item.active { background: #5cfb6c; color: #111; font-weight: bold; border-color: #5cfb6c; }
-      .instructions { background: #222; padding: 16px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9rem; line-height: 1.6; }
+      .instructions { background: #222; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 0.85rem; line-height: 1.5; }
       .instructions h3 { color: #5cfb6c; margin-bottom: 8px; }
       .instructions ul { margin-left: 20px; }
-      .instructions li { margin: 4px 0; }
 
-      /* Start overlay */
-      .start-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); z-index: 300; flex-direction: column; gap: 12px; padding: 12px; }
+      .start-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.8); z-index: 300; flex-direction: column; gap: 12px; padding: 20px; text-align: center; }
       .start-overlay.hidden { display: none; }
-      .start-button { padding: 14px 22px; font-size: 1.1rem; background: #5cfb6c; color: #111; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
-      .start-hint { color: #ddd; font-size: 0.95rem; text-align: center; max-width: 420px; }
+      .start-button { padding: 14px 24px; font-size: 1.1rem; background: #5cfb6c; color: #111; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; max-width: 250px; }
+      .start-hint { color: #ddd; font-size: 0.9rem; max-width: 420px; }
       .small-btn { padding: 8px 12px; font-size: 0.9rem; background: #333; color: #eee; border: 1px solid #555; border-radius: 6px; cursor: pointer; }
       .status-line { margin-top: 6px; color: #ccc; font-size: 0.9rem; }
-      select, .control-row { margin-top: 8px; }
-      #debugPanel { margin-top: 8px; background:#111; border:1px solid #333; padding:8px; color:#9fd; font-size:0.8rem; max-width:420px; max-height:180px; overflow:auto; }
+      select { padding: 8px; border-radius: 6px; background: #333; color: white; border: 1px solid #555; max-width: 200px; }
+      .control-row { margin-top: 8px; display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap;}
+      #debugPanel { display: none; } /* 正式遊玩時隱藏 debug 面板 */
     </style>
   </head>
   <body>
     <div class="container">
-      <h1>🎮 Clap Jump - 拍手跳躍遊戲</h1>
+      <h1>🎮 Clap Jump - 拍手跳躍</h1>
       
       <div class="instructions">
         <h3>📖 遊戲說明：</h3>
         <ul>
           <li>👋 <strong>快速拍手（兩隻手靠近）= 跳躍</strong></li>
-          <li>🦖 躲避從右邊來的紅色障礙物</li>
-          <li>🎯 成功躲避得 1 分</li>
-          <li>❌ 被擊中遊戲結束</li>
-          <li>📈 每 5 分難度加倍</li>
+          <li>🦖 躲避從右邊來的紅色障礙物，成功躲避得 1 分</li>
+          <li>📈 每 5 分速度加快，被擊中即結束</li>
         </ul>
       </div>
 
       <div class="game-area">
-        <video id="video" autoplay playsinline></video>
+        <video id="video" autoplay playsinline muted></video>
         <canvas id="canvas"></canvas>
 
-        <!-- Start overlay (click to request camera and start) -->
         <div id="startOverlay" class="start-overlay">
-          <div class="start-hint">點擊下方按鈕以啟動相機並開始遊戲（僅需相機權限）。若手機有前後鏡頭，可從下方選擇。</div>
+          <div class="start-hint">點擊下方按鈕啟動相機<br>(需允許相機權限)</div>
           <div class="control-row">
             <select id="cameraSelect"></select>
-            <button id="refreshCameras" class="small-btn">刷新鏡頭列表</button>
+            <button id="refreshCameras" class="small-btn">刷新鏡頭</button>
           </div>
           <button id="startBtn" class="start-button">開始遊戲</button>
           <div class="status-line" id="startStatus">等待中…</div>
-          <div style="margin-top:6px"><button id="retryBtn" class="small-btn">重試啟動相機</button></div>
-          <pre id="debugPanel">debug: 未啟動</pre>
+          <button id="retryBtn" class="small-btn" style="display:none;">重試</button>
         </div>
 
         <div class="ui">
@@ -101,59 +97,79 @@
       const retryBtn = document.getElementById('retryBtn');
       const startStatus = document.getElementById('startStatus');
       const cameraSelect = document.getElementById('cameraSelect');
-      const refreshCameras = document.getElementById('refreshCameras');
-      const debugPanel = document.getElementById('debugPanel');
-
-      // 設置 canvas
-      function resizeCanvas() {
-        canvas.width = canvas.parentElement.offsetWidth;
-        canvas.height = canvas.parentElement.offsetHeight;
-      }
-      resizeCanvas();
 
       // 遊戲常量
       const GRAVITY = 0.6;
-      const GROUND_Y = canvas.height - 120;
-      const DINO_WIDTH = 50;
-      const DINO_HEIGHT = 50;
-      const OBSTACLE_WIDTH = 40;
-      const OBSTACLE_HEIGHT = 60;
+      const DINO_WIDTH = 40;
+      const DINO_HEIGHT = 40;
+      const OBSTACLE_WIDTH = 30;
+      const OBSTACLE_HEIGHT = 50;
 
       // 遊戲變量
+      let GROUND_Y = 0; // 關鍵修正 3：改為動態計算
       let hands = null;
       let gameRunning = false;
       let score = 0;
       let gameSpeed = 1;
       let obstacles = [];
       let obstacleSpawnCounter = 0;
-      let obstacleSpawnRate = 150;
+      let obstacleSpawnRate = 120; // 稍微調快一點初始生成速度
 
       // 玩家（恐龍）
-      let dinoX = 50;
-      let dinoY = GROUND_Y;
+      let dinoX = 40;
+      let dinoY = 0;
       let dinoVelocityY = 0;
       let isJumping = false;
 
       // 偵測變量
       let lastHandDistance = 0;
       let lastHandDistanceTime = 0;
-      let handDistanceVelocity = 0;
       let lastJumpTime = 0;
-      const JUMP_COOLDOWN = 200; // ms，避免連續跳躍
+      const JUMP_COOLDOWN = 300; 
 
-      // 追蹤 media stream
       let mediaStream = null;
 
-      function logDebug(obj) {
-        try { debugPanel.textContent = JSON.stringify(obj, null, 2); } catch (e) { debugPanel.textContent = String(obj); }
+      // 設置 canvas 大小與動態地面
+      function resizeCanvas() {
+        canvas.width = canvas.parentElement.offsetWidth;
+        canvas.height = canvas.parentElement.offsetHeight;
+        GROUND_Y = canvas.height - 60; // 根據螢幕動態計算地面
+        if (!isJumping) dinoY = GROUND_Y;
+      }
+      window.addEventListener('resize', resizeCanvas);
+      resizeCanvas();
+
+      // 關鍵修正 2：補齊遺失的 Obstacle 類別
+      class Obstacle {
+        constructor() {
+          this.x = canvas.width;
+          this.y = GROUND_Y + DINO_HEIGHT - OBSTACLE_HEIGHT;
+          this.width = OBSTACLE_WIDTH;
+          this.height = OBSTACLE_HEIGHT;
+          this.speed = 5 * gameSpeed;
+        }
+        update() {
+          this.x -= this.speed;
+        }
+        draw() {
+          ctx.fillStyle = '#ff6b6b';
+          ctx.fillRect(this.x, this.y, this.width, this.height);
+        }
+        isOffScreen() {
+          return this.x + this.width < 0;
+        }
+        collidesWith(dx, dy, dw, dh) {
+          return (
+            dx < this.x + this.width &&
+            dx + dw > this.x &&
+            dy < this.y + this.height &&
+            dy + dh > this.y
+          );
+        }
       }
 
       async function listCameras() {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
-          cameraSelect.innerHTML = '<option>不支援 enumerateDevices</option>';
-          return;
-        }
-
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
           const cams = devices.filter(d => d.kind === 'videoinput');
@@ -164,14 +180,8 @@
             opt.textContent = c.label || `Camera ${idx+1}`;
             cameraSelect.appendChild(opt);
           });
-          if (cams.length === 0) {
-            cameraSelect.innerHTML = '<option>未找到相機</option>';
-          }
-          logDebug({ camerasFound: cams.length, devices: cams.map(d => ({label:d.label, id:d.deviceId})) });
         } catch (err) {
-          console.error('enumerateDevices failed', err);
-          cameraSelect.innerHTML = '<option>列表取得失敗</option>';
-          logDebug({ error: err.message || err.name });
+          console.error(err);
         }
       }
 
@@ -179,12 +189,11 @@
         hands = new Hands({
           locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@latest/${file}`
         });
-
         hands.setOptions({
           maxNumHands: 2,
           minDetectionConfidence: 0.5,
           minTrackingConfidence: 0.5,
-          modelComplexity: 0
+          modelComplexity: 0 // 手機端保持為 0 以維持效能
         });
       }
 
@@ -195,98 +204,190 @@
         return { x: (sumX / landmarks.length) * canvas.width, y: (sumY / landmarks.length) * canvas.height };
       }
 
-      function distanceBetween(p1, p2) {
-        if (!p1 || !p2) return 999;
-        const dx = p1.x - p2.x; const dy = p1.y - p2.y; return Math.sqrt(dx*dx + dy*dy);
-      }
-
       function detectClapFromHands(results) {
         if (!results.multiHandLandmarks || results.multiHandLandmarks.length < 2) {
-          handDetectorIndicator.textContent = '👋 手部偵測: 需要 2 隻手';
+          handDetectorIndicator.textContent = '👋 需露出雙手';
           handDetectorIndicator.classList.remove('active');
           return false;
         }
         const center1 = handCenter(results.multiHandLandmarks[0]);
         const center2 = handCenter(results.multiHandLandmarks[1]);
-        const dist = distanceBetween(center1, center2);
+        
+        // 算出兩手距離
+        const dx = center1.x - center2.x;
+        const dy = center1.y - center2.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
         const now = Date.now();
         const timeDelta = Math.max(now - lastHandDistanceTime, 1);
-        handDistanceVelocity = (lastHandDistance - dist) / timeDelta * 1000; // px/s
-        handDetectorIndicator.textContent = `👋 距離: ${(dist).toFixed(0)}px | 速度: ${handDistanceVelocity.toFixed(2)}px/s`;
-        lastHandDistance = dist; lastHandDistanceTime = now;
-        if (handDistanceVelocity > 200) { handDetectorIndicator.classList.add('active'); return true; }
-        else { handDetectorIndicator.classList.remove('active'); return false; }
+        const velocity = (lastHandDistance - dist) / timeDelta * 1000; 
+
+        handDetectorIndicator.textContent = `👋 距離: ${(dist).toFixed(0)}px`;
+        lastHandDistance = dist; 
+        lastHandDistanceTime = now;
+
+        // 如果雙手正在快速靠近 (速度 > 250) 判定為拍手
+        if (velocity > 250) { 
+          handDetectorIndicator.classList.add('active'); 
+          return true; 
+        } else { 
+          handDetectorIndicator.classList.remove('active'); 
+          return false; 
+        }
       }
 
-      function jump() { const now = Date.now(); if (now - lastJumpTime > JUMP_COOLDOWN && !isJumping) { dinoVelocityY = -15; isJumping = true; lastJumpTime = now; } }
-      function updateDino() { dinoVelocityY += GRAVITY; dinoY += dinoVelocityY; if (dinoY >= GROUND_Y) { dinoY = GROUND_Y; dinoVelocityY = 0; isJumping = false; } }
-      function drawDino() { ctx.fillStyle = '#5cfb6c'; ctx.fillRect(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT); ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 3; ctx.strokeRect(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT); ctx.fillStyle = '#000'; ctx.fillRect(dinoX + 15, dinoY + 15, 8, 8); }
-      function checkCollisions() { for (let i = obstacles.length - 1; i >= 0; i--) { if (obstacles[i].collidesWith(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT)) { endGame(); return; } } }
-      function endGame() { gameRunning = false; finalScoreDisplay.textContent = score; gameOverDiv.style.display = 'block'; }
+      function jump() { 
+        const now = Date.now(); 
+        if (now - lastJumpTime > JUMP_COOLDOWN && !isJumping) { 
+          dinoVelocityY = -12; // 調整跳躍高度以適應手機畫面
+          isJumping = true; 
+          lastJumpTime = now; 
+        } 
+      }
 
-      async function processFrame() { if (!gameRunning) return; try { const results = await hands.process(videoElement); const clapFromHands = detectClapFromHands(results); if (clapFromHands) jump(); } catch (err) { console.error('Detection error:', err); } requestAnimationFrame(processFrame); }
-      function gameLoop() { if (!gameRunning) return; ctx.fillStyle = 'rgba(26, 26, 46, 0.5)'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.strokeStyle = '#444'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, GROUND_Y); ctx.lineTo(canvas.width, GROUND_Y); ctx.stroke(); obstacleSpawnCounter++; if (obstacleSpawnCounter > obstacleSpawnRate) { obstacles.push(new Obstacle()); obstacleSpawnCounter = 0; obstacleSpawnRate = Math.max(80, 150 - score*3); } for (let i = obstacles.length - 1; i >= 0; i--) { obstacles[i].update(); obstacles[i].draw(); if (obstacles[i].isOffScreen()) { obstacles.splice(i,1); score++; scoreDisplay.textContent = score; if (score%5 === 0) { gameSpeed += 0.5; speedDisplay.textContent = gameSpeed.toFixed(1); } } } updateDino(); drawDino(); checkCollisions(); requestAnimationFrame(gameLoop); }
+      function updateDino() { 
+        dinoVelocityY += GRAVITY; 
+        dinoY += dinoVelocityY; 
+        if (dinoY >= GROUND_Y) { 
+          dinoY = GROUND_Y; 
+          dinoVelocityY = 0; 
+          isJumping = false; 
+        } 
+      }
+
+      function drawDino() { 
+        ctx.fillStyle = '#5cfb6c'; 
+        ctx.fillRect(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT); 
+        ctx.strokeStyle = '#00ff00'; 
+        ctx.lineWidth = 2; 
+        ctx.strokeRect(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT); 
+        // 眼睛
+        ctx.fillStyle = '#000'; 
+        ctx.fillRect(dinoX + 25, dinoY + 8, 6, 6); 
+      }
+
+      function checkCollisions() { 
+        for (let i = obstacles.length - 1; i >= 0; i--) { 
+          if (obstacles[i].collidesWith(dinoX, dinoY, DINO_WIDTH, DINO_HEIGHT)) { 
+            endGame(); 
+            return; 
+          } 
+        } 
+      }
+
+      function endGame() { 
+        gameRunning = false; 
+        finalScoreDisplay.textContent = score; 
+        gameOverDiv.style.display = 'block'; 
+      }
+
+      async function processFrame() { 
+        if (!gameRunning) return; 
+        try { 
+          const results = await hands.process(videoElement); 
+          if (detectClapFromHands(results)) jump(); 
+        } catch (err) { 
+          console.error('Detection error:', err); 
+        } 
+        requestAnimationFrame(processFrame); 
+      }
+
+      function gameLoop() { 
+        if (!gameRunning) return; 
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height); // 清除畫布，避免殘影導致手機效能變差
+        
+        // 畫地面
+        ctx.strokeStyle = '#444'; 
+        ctx.lineWidth = 2; 
+        ctx.beginPath(); 
+        ctx.moveTo(0, GROUND_Y + DINO_HEIGHT); 
+        ctx.lineTo(canvas.width, GROUND_Y + DINO_HEIGHT); 
+        ctx.stroke(); 
+
+        // 障礙物生成邏輯
+        obstacleSpawnCounter++; 
+        if (obstacleSpawnCounter > obstacleSpawnRate) { 
+          obstacles.push(new Obstacle()); 
+          obstacleSpawnCounter = 0; 
+          obstacleSpawnRate = Math.max(60, 120 - score * 3); 
+        } 
+
+        // 更新與繪製障礙物
+        for (let i = obstacles.length - 1; i >= 0; i--) { 
+          obstacles[i].update(); 
+          obstacles[i].draw(); 
+          if (obstacles[i].isOffScreen()) { 
+            obstacles.splice(i, 1); 
+            score++; 
+            scoreDisplay.textContent = score; 
+            if (score % 5 === 0) { 
+              gameSpeed += 0.2; 
+              speedDisplay.textContent = gameSpeed.toFixed(1); 
+            } 
+          } 
+        } 
+        
+        updateDino(); 
+        drawDino(); 
+        checkCollisions(); 
+        requestAnimationFrame(gameLoop); 
+      }
 
       async function initCamera(deviceId = null) {
         try {
           startStatus.textContent = '正在啟動相機...';
-          const constraints = deviceId ? { video: { deviceId: { exact: deviceId } } } : { video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } };
-          // stop old tracks
+          const constraints = deviceId 
+            ? { video: { deviceId: { exact: deviceId }, width: 640, height: 480 } } 
+            : { video: { facingMode: 'user', width: 640, height: 480 } }; // 降低解析度減輕手機負擔
+
           if (mediaStream) {
             mediaStream.getTracks().forEach(t => t.stop());
-            mediaStream = null;
           }
           const stream = await navigator.mediaDevices.getUserMedia(constraints);
           mediaStream = stream;
           videoElement.srcObject = stream;
+          
+          // 等待影片載入完畢再播放
+          await new Promise((resolve) => {
+            videoElement.onloadedmetadata = () => { resolve(); };
+          });
           await videoElement.play();
-          startStatus.textContent = '相機已啟動';
-          // populate camera list again (labels available after permission)
+          
+          startStatus.textContent = '相機已啟動，載入模型中...';
           await listCameras();
-          logDebug({streamActive:true, tracks: stream.getTracks().map(t => ({kind:t.kind, label:t.label}))});
           return true;
         } catch (err) {
-          console.error('Camera init failed:', err);
-          startStatus.textContent = '無法啟動相機: ' + (err.message || err.name);
-          logDebug({error: err.name || err.message});
+          startStatus.textContent = '無法啟動相機: ' + err.name;
+          retryBtn.style.display = 'inline-block';
           return false;
         }
       }
 
       async function startGameAfterCamera() {
+        await initHands();
         startOverlay.classList.add('hidden');
         gameRunning = true;
-        await initHands();
+        resizeCanvas();
         processFrame();
         gameLoop();
       }
 
       async function startButtonHandler() {
-        startStatus.textContent = '請允許相機權限...';
+        startBtn.disabled = true;
         const selected = cameraSelect.value || null;
         const ok = await initCamera(selected);
         if (ok) await startGameAfterCamera();
+        startBtn.disabled = false;
       }
 
-      retryBtn.addEventListener('click', async () => {
-        startStatus.textContent = '重試中...';
-        const selected = cameraSelect.value || null;
-        const ok = await initCamera(selected);
-        if (ok) await startGameAfterCamera();
-      });
-
       startBtn.addEventListener('click', startButtonHandler);
-      refreshCameras.addEventListener('click', async () => { startStatus.textContent = '刷新相機列表...'; await listCameras(); startStatus.textContent = '列表已更新'; });
+      document.getElementById('refreshCameras').addEventListener('click', listCameras);
+      retryBtn.addEventListener('click', startButtonHandler);
 
-      // On load: show overlay and list cameras (labels may be empty until permission granted)
       window.addEventListener('load', async () => {
-        startOverlay.classList.remove('hidden');
-        startStatus.textContent = '請點「開始遊戲」以啟動相機';
         await listCameras();
       });
-
-      window.addEventListener('resize', resizeCanvas);
     </script>
   </body>
 </html>
-
